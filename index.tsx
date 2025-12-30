@@ -80,6 +80,10 @@ function App() {
   const [hoveredTask, setHoveredTask] = useState<Activity | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [completingId, setCompletingId] = useState<string | null>(null);
+  
+  // Partial Capture State
+  const [partialTarget, setPartialTarget] = useState<Activity | null>(null);
+  const [partialTimes, setPartialTimes] = useState({ start: '', end: '' });
 
   // --- Sidebar Specific State ---
   const [todos, setTodos] = useState<{id: string, text: string, done: boolean}[]>(() => {
@@ -114,10 +118,12 @@ function App() {
   const fetchIntelligence = async () => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const now = new Date();
+      const todayStr = now.toDateString();
       
       const newsResp = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: "Top 2 bullet headlines each for: AI/Tech, World News, and Indian Politics. Do NOT use markdown symbols like ###. Use plain text labels like 'AI:' etc.",
+        contents: `Today is ${todayStr}. Fetch the top 2 absolute latest news headlines for TODAY and the 3 most significant stories from THIS WEEK. Categories: AI/Tech, World News, and Indian Politics. Do NOT use markdown symbols like ### or **. Use plain text labels like 'TODAY:', 'THIS WEEK:', 'AI:', etc. Be concise.`,
         config: { tools: [{ googleSearch: {} }] }
       });
 
@@ -333,10 +339,27 @@ function App() {
         setCompletingId(null);
         setExpandingActivityId(null);
       }, 600); // Wait for the fade-out/slide-up animation
+    } else if (status === 'partial') {
+      const act = activities.find(a => a.id === id);
+      if (act) {
+        setPartialTarget(act);
+        setPartialTimes({ start: act.startTime, end: act.endTime });
+      }
     } else {
       setActivities(prev => prev.map(a => a.id === id ? { ...a, status } : a));
       setExpandingActivityId(null);
     }
+  };
+
+  const handleSavePartial = () => {
+    if (!partialTarget) return;
+    setActivities(prev => prev.map(a => 
+      a.id === partialTarget.id 
+      ? { ...a, status: 'partial', actualStartTime: partialTimes.start, actualEndTime: partialTimes.end } 
+      : a
+    ));
+    setPartialTarget(null);
+    setExpandingActivityId(null);
   };
 
   const deleteActivity = (id: string) => {
@@ -366,7 +389,7 @@ function App() {
       </div>
 
       {/* 2. ZEN SIDEBAR */}
-      <div className={`os-zen-sidebar ${isSidebarOpen ? 'is-open' : ''}`}>
+      <div className={`os-zen-sidebar custom-scroll ${isSidebarOpen ? 'is-open' : ''}`}>
         <button className="os-close-btn" onClick={() => setIsSidebarOpen(false)}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -543,7 +566,14 @@ function App() {
                             <div className="row-indicator" style={{ background: DOMAIN_COLORS[a.domain] }} />
                             <div className="row-main">
                                <div className="row-header">
-                                  <span className="row-time">{a.startTime} – {a.endTime}</span>
+                                  <span className="row-time">
+                                    {a.startTime} – {a.endTime}
+                                    {a.status === 'partial' && a.actualStartTime && (
+                                      <span className="row-actual-time"> 
+                                        (Actual: {a.actualStartTime} – {a.actualEndTime})
+                                      </span>
+                                    )}
+                                  </span>
                                   <span className="row-domain" style={{ color: DOMAIN_COLORS[a.domain] }}>{a.domain}</span>
                                </div>
                                <span className="row-name">{a.name}</span>
@@ -683,6 +713,35 @@ function App() {
             {hoveredTask.domain} • {hoveredTask.startTime}
           </div>
           <div className="tt-body">{hoveredTask.name}</div>
+        </div>
+      )}
+
+      {/* Partial Capture Modal */}
+      {partialTarget && (
+        <div className="os-overlay-blur" onClick={() => setPartialTarget(null)}>
+          <div className="os-partial-modal animate-slide-up" onClick={e => e.stopPropagation()}>
+            <header>
+               <div className="modal-indicator" style={{ background: DOMAIN_COLORS[partialTarget.domain] }} />
+               <h3>Capture Deviation</h3>
+            </header>
+            <div className="modal-body">
+               <p>Record actual time spent on <strong>{partialTarget.name}</strong></p>
+               <div className="temporal-input-row">
+                 <div className="os-input-field">
+                   <label>Actual Start</label>
+                   <input type="time" value={partialTimes.start} onChange={e => setPartialTimes({ ...partialTimes, start: e.target.value })} />
+                 </div>
+                 <div className="os-input-field">
+                   <label>Actual End</label>
+                   <input type="time" value={partialTimes.end} onChange={e => setPartialTimes({ ...partialTimes, end: e.target.value })} />
+                 </div>
+               </div>
+               <div className="modal-footer">
+                  <button className="btn-secondary" onClick={() => setPartialTarget(null)}>Discard</button>
+                  <button className="btn-primary-v2" onClick={handleSavePartial}>Log Execution</button>
+               </div>
+            </div>
+          </div>
         </div>
       )}
 
