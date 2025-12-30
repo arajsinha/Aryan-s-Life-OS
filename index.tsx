@@ -82,6 +82,7 @@ function App() {
   const [hoveredTask, setHoveredTask] = useState<Activity | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [completingId, setCompletingId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   
   // Partial Capture State
   const [partialTarget, setPartialTarget] = useState<Activity | null>(null);
@@ -116,6 +117,14 @@ function App() {
     localStorage.setItem('sidebar_scratch', scratchpad);
     localStorage.setItem('os_user_location', userLocation);
   }, [todos, scratchpad, userLocation]);
+
+  // --- Toast Timer ---
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // --- Geolocation ---
   const detectLocation = () => {
@@ -176,9 +185,11 @@ function App() {
         weather: weatherResp.text || 'Unknown Location',
         newsSources,
       });
+      setToast('Intelligence Sync Complete');
     } catch (e) {
       console.error(e);
       setIntelligence(prev => ({ ...prev, news: 'Feed synchronization failed.' }));
+      setToast('Sync Failed');
     }
   };
 
@@ -268,7 +279,7 @@ function App() {
     return { status: 'aligned', message: 'Current actions reflect phase priorities.' };
   }, [activities, activePeriod]);
 
-  // --- Temporal Map Summary Logic ---
+  // --- Temporal Map Logic ---
   const weekSummary = useMemo(() => {
     if (heatmapView !== 'week') return null;
 
@@ -279,24 +290,19 @@ function App() {
     
     const weekActs = activities.filter(a => {
       const d = new Date(a.date);
-      // Fix: Use .getTime() for reliable Date object comparison in TypeScript
       return d.getTime() >= weekStart.getTime() && d.getTime() <= today.getTime();
     });
 
     if (weekActs.length === 0) return { dominant: 'None', topThree: [] };
 
-    // Dominant Domain
     const domainCounts: Record<string, number> = {} as any;
     weekActs.forEach(a => domainCounts[a.domain] = (domainCounts[a.domain] || 0) + 1);
-    // Fix: Cast values to number explicitly to ensure correct arithmetic subtraction
-    const dominant = ((Object.entries(domainCounts) as [string, number][]).sort((a, b) => (b[1] as number) - (a[1] as number))[0]?.[0] || 'None') as Domain;
+    const dominant = ((Object.entries(domainCounts) as [string, number][]).sort((a, b) => b[1] - a[1])[0]?.[0] || 'None') as Domain;
 
-    // Top Tasks
     const taskCounts: Record<string, number> = {};
     weekActs.forEach(a => taskCounts[a.name] = (taskCounts[a.name] || 0) + 1);
-    // Fix: Cast values to number explicitly to ensure correct arithmetic subtraction
     const topThree = (Object.entries(taskCounts) as [string, number][])
-      .sort((a, b) => (b[1] as number) - (a[1] as number))
+      .sort((a, b) => b[1] - a[1])
       .slice(0, 3)
       .map(([name]) => name);
 
@@ -309,12 +315,45 @@ function App() {
     const today = new Date();
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today);
-      // Fix: today.getDate() is a number, subtracting number i. Ensure it's not treated as non-numeric.
       d.setDate(today.getDate() - i);
       dates.push(d.toISOString().split('T')[0]);
     }
     return dates;
   }, [heatmapView]);
+
+  const monthGridData = useMemo(() => {
+    if (heatmapView !== 'month') return [];
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    
+    const dates = [];
+    // Padding for Monday start
+    let startPadding = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
+    for(let i=0; i<startPadding; i++) dates.push(null);
+
+    for(let i=1; i<=lastDay.getDate(); i++) {
+      dates.push(new Date(year, month, i).toISOString().split('T')[0]);
+    }
+    return dates;
+  }, [heatmapView]);
+
+  const monthSummary = useMemo(() => {
+    if (heatmapView !== 'month') return null;
+    const today = new Date();
+    const monthStr = today.toISOString().slice(0, 7);
+    const monthActs = activities.filter(a => a.date.startsWith(monthStr));
+    
+    if (monthActs.length === 0) return { total: 0, dominant: 'None' };
+
+    const domainCounts: Record<string, number> = {} as any;
+    monthActs.forEach(a => domainCounts[a.domain] = (domainCounts[a.domain] || 0) + 1);
+    const dominant = ((Object.entries(domainCounts) as [string, number][]).sort((a, b) => b[1] - a[1])[0]?.[0] || 'None') as Domain;
+
+    return { total: monthActs.length, dominant };
+  }, [activities, heatmapView]);
 
   // --- Logic Handlers ---
   const handleParseActivity = async () => {
@@ -406,7 +445,7 @@ function App() {
 
   const updateWeight = (domain: Domain, val: number) => {
     if (!activePeriod) return;
-    setLifePeriods(prev => prev.map(p => p.id === activePeriodId ? { ...p, weights: { ...p.weights, [domain]: val } } : p));
+    setLifePeriods((prev: LifePeriod[]) => prev.map(p => p.id === activePeriodId ? { ...p, weights: { ...p.weights, [domain]: val } } : p));
   };
 
   const addTodo = () => {
@@ -418,6 +457,16 @@ function App() {
   return (
     <div className={`os-container ${isSidebarOpen ? 'sidebar-active' : ''}`}>
       
+      {/* Toast Notification */}
+      <div className={`os-toast ${toast ? 'is-visible' : ''}`}>
+        <div className="toast-content">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '8px' }}>
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          {toast}
+        </div>
+      </div>
+
       {/* 1. SIDEBAR TRIGGER */}
       <div className="os-sidebar-trigger" onClick={() => setIsSidebarOpen(true)}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -435,6 +484,35 @@ function App() {
 
         <div className="zen-content">
           <div className="zen-col">
+            {/* Weather Card */}
+            <section className="zen-card glass-card zen-weather-card">
+              <header className="zen-header">
+                <h3>CLIMATE</h3>
+                <button className="zen-minimal-refresh" onClick={fetchIntelligence}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                    <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                </button>
+              </header>
+              <div className="zen-weather-display">
+                <div className="zen-weather-badge-v2">{intelligence.weather}</div>
+                <div className="zen-location-field">
+                  <input 
+                      type="text" 
+                      value={userLocation} 
+                      onChange={e => setUserLocation(e.target.value)} 
+                      placeholder="Set location..." 
+                  />
+                  <button className="zen-gps-btn" onClick={detectLocation} title="Detect Location">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                        <circle cx="12" cy="10" r="3" />
+                      </svg>
+                  </button>
+                </div>
+              </div>
+            </section>
+
             <section className="zen-card glass-card">
               <header className="zen-header">
                 <h3>FOCUS FLOW</h3>
@@ -449,7 +527,7 @@ function App() {
                 />
                 <button onClick={addTodo} className="zen-accent-btn">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '6px' }}>
-                    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" />
                   </svg>
                   ADD
                 </button>
@@ -467,34 +545,21 @@ function App() {
                 ))}
               </div>
             </section>
+          </div>
 
+          <div className="zen-col">
             <section className="zen-card glass-card">
               <header className="zen-header">
                 <h3>SIGNALS</h3>
                 <div className="zen-signals-meta">
-                  <div className="zen-weather-badge">{intelligence.weather}</div>
                   <button className="zen-minimal-refresh" onClick={fetchIntelligence}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '6px' }}>
                       <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
                     </svg>
-                    SYNC
+                    REFRESH
                   </button>
                 </div>
               </header>
-              <div className="zen-location-field">
-                 <input 
-                    type="text" 
-                    value={userLocation} 
-                    onChange={e => setUserLocation(e.target.value)} 
-                    placeholder="Set location for weather..." 
-                 />
-                 <button className="zen-gps-btn" onClick={detectLocation} title="Detect Location">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                      <circle cx="12" cy="10" r="3" />
-                    </svg>
-                 </button>
-              </div>
               <div className="zen-intelligence custom-scroll">
                 <div className="zen-news-feed">
                    {intelligence.news.split('\n').map((line, i) => (
@@ -510,9 +575,7 @@ function App() {
                 )}
               </div>
             </section>
-          </div>
 
-          <div className="zen-col">
             <section className="zen-card glass-card fill-height">
               <header className="zen-header"><h3>BRAINDUMP</h3></header>
               <textarea 
@@ -704,7 +767,7 @@ function App() {
                 )}
                 
                 {heatmapView === 'week' && (
-                  <div className="os-heatmap-week-container">
+                  <div className="os-heatmap-week-container custom-scroll-x">
                     <div className="os-grid-week">
                       {weekGridData.map((date, idx) => (
                         <div key={date} className="os-week-col">
@@ -730,14 +793,14 @@ function App() {
                     {weekSummary && (
                       <div className="os-view-summary animate-fade-in">
                         <div className="summary-section">
-                           <label>Dominant Domain</label>
+                           <label>Week Dominant</label>
                            <div className="summary-val">
                              <DomainIcon domain={weekSummary.dominant as Domain} />
                              <span>{weekSummary.dominant}</span>
                            </div>
                         </div>
                         <div className="summary-section">
-                           <label>Top Objectives</label>
+                           <label>Primary Intent</label>
                            <div className="summary-tags">
                              {weekSummary.topThree.length > 0 ? (
                                weekSummary.topThree.map(t => <span key={t} className="summary-tag">{t}</span>)
@@ -752,7 +815,42 @@ function App() {
                 )}
 
                 {heatmapView === 'month' && (
-                  <div className="os-placeholder-view">View transition active...</div>
+                  <div className="os-heatmap-month-container">
+                     <div className="os-grid-month">
+                        {['M','T','W','T','F','S','S'].map(d => <div key={d} className="month-day-head">{d}</div>)}
+                        {monthGridData.map((date, idx) => {
+                          if (!date) return <div key={`empty-${idx}`} className="os-month-cell empty" />;
+                          
+                          const dayActs = activities.filter(a => a.date === date);
+                          const dominant = dayActs.length > 0 
+                            ? (Object.entries(dayActs.reduce((acc, a) => ({...acc, [a.domain]: (acc[a.domain] || 0) + 1}), {} as any)) as [string, number][])
+                                .sort((a, b) => b[1] - a[1])[0][0] as Domain
+                            : null;
+
+                          return (
+                            <div key={date} className="os-month-cell">
+                               <span className="month-date-num">{new Date(date).getDate()}</span>
+                               {dominant && <div className="month-indicator-dot" style={{ backgroundColor: DOMAIN_COLORS[dominant] }} />}
+                            </div>
+                          );
+                        })}
+                     </div>
+                     {monthSummary && (
+                        <div className="os-view-summary animate-fade-in">
+                           <div className="summary-section">
+                              <label>Month Dominant</label>
+                              <div className="summary-val">
+                                <DomainIcon domain={monthSummary.dominant as Domain} />
+                                <span>{monthSummary.dominant}</span>
+                              </div>
+                           </div>
+                           <div className="summary-section">
+                              <label>Total Commits</label>
+                              <span className="summary-count-val">{monthSummary.total} intents</span>
+                           </div>
+                        </div>
+                     )}
+                  </div>
                 )}
              </div>
           </section>
@@ -803,8 +901,8 @@ function App() {
       {isDrawerOpen && (
         <div className="os-overlay-blur" onClick={() => setIsDrawerOpen(false)}>
           <div className="os-phase-drawer" onClick={e => e.stopPropagation()}>
-            <header><h2>Life Configuration</h2><button onClick={() => setIsDrawerOpen(false)}>×</button></header>
-            <div className="os-drawer-scroll">
+            <header><h2>Life Configuration</h2><button onClick={() => setIsDrawerOpen(false)}>&times;</button></header>
+            <div className="os-drawer-scroll custom-scroll">
               <div className="os-input-field">
                 <label>Default Location (Geo-Context)</label>
                 <input 
@@ -816,15 +914,24 @@ function App() {
               </div>
               <div className="os-input-field">
                 <label>Current Phase Objective</label>
-                {/* Fix: Explicitly cast the updater argument to 'any' to avoid the 'unknown' map error */}
-                <input type="text" value={activePeriod?.title || ''} onChange={e => setLifePeriods((p: any) => p.map((x: LifePeriod) => x.id === activePeriodId ? {...x, title: e.target.value} : x))} />
+                <input 
+                  type="text" 
+                  value={activePeriod?.title || ''} 
+                  onChange={e => setLifePeriods((p: LifePeriod[]) => p.map(x => x.id === activePeriodId ? {...x, title: e.target.value} : x))} 
+                />
               </div>
               <div className="os-input-field">
                 <label>Domain Bias (System Weights)</label>
                 {DOMAINS.map(d => (
                   <div key={d} className="os-range-group">
                     <div className="range-label"><span>{d}</span> <span>{activePeriod?.weights[d]}%</span></div>
-                    <input type="range" min="0" max="100" value={activePeriod?.weights[d]} onChange={e => updateWeight(d, parseInt(e.target.value))} />
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="100" 
+                      value={activePeriod?.weights[d]} 
+                      onChange={e => updateWeight(d, parseInt(e.target.value))} 
+                    />
                   </div>
                 ))}
               </div>
