@@ -1,0 +1,8 @@
+{
+  "name": "Life OS",
+  "description": "An intentional planning system that aligns daily actions with long-term life periods using Gemini-powered natural language processing.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "prompt": ""
+}
