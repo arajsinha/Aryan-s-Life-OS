@@ -67,6 +67,8 @@ function App() {
     return saved ? (JSON.parse(saved) as Activity[]) : [];
   });
 
+  const [userLocation, setUserLocation] = useState(() => localStorage.getItem('os_user_location') || '');
+
   // --- UI State ---
   const [activePeriodId] = useState<string>(lifePeriods[0]?.id || '');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -112,7 +114,27 @@ function App() {
   useEffect(() => {
     localStorage.setItem('sidebar_todos', JSON.stringify(todos));
     localStorage.setItem('sidebar_scratch', scratchpad);
-  }, [todos, scratchpad]);
+    localStorage.setItem('os_user_location', userLocation);
+  }, [todos, scratchpad, userLocation]);
+
+  // --- Geolocation ---
+  const detectLocation = () => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const { latitude, longitude } = pos.coords;
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      try {
+        const resp = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: `I am at coordinates ${latitude}, ${longitude}. What is the city and region name? Return ONLY the city and region name, nothing else.`,
+        });
+        const loc = resp.text?.trim();
+        if (loc) setUserLocation(loc);
+      } catch (e) {
+        console.error("Geocoding failed", e);
+      }
+    });
+  };
 
   // --- Intelligence Fetching ---
   const fetchIntelligence = async () => {
@@ -139,9 +161,13 @@ function App() {
         .filter(c => c.web)
         .map(c => ({ uri: c.web?.uri || '', title: c.web?.title || 'Source' }));
 
+      const weatherPrompt = userLocation 
+        ? `Provide the current weather for ${userLocation}. Extremely brief, e.g. '${userLocation}: Sunny • 21°C'.`
+        : "Provide the current weather AND the location name for my approximate area. Extremely brief, e.g. 'San Francisco: Sunny • 21°C'.";
+
       const weatherResp = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: "Provide the current weather AND the location name for my approximate area. Extremely brief, e.g. 'San Francisco: Sunny • 21°C'.",
+        contents: weatherPrompt,
         config: { tools: [{ googleSearch: {} }] }
       });
 
@@ -253,7 +279,8 @@ function App() {
     
     const weekActs = activities.filter(a => {
       const d = new Date(a.date);
-      return d >= weekStart && d <= today;
+      // Fix: Use .getTime() for reliable Date object comparison in TypeScript
+      return d.getTime() >= weekStart.getTime() && d.getTime() <= today.getTime();
     });
 
     if (weekActs.length === 0) return { dominant: 'None', topThree: [] };
@@ -261,14 +288,15 @@ function App() {
     // Dominant Domain
     const domainCounts: Record<string, number> = {} as any;
     weekActs.forEach(a => domainCounts[a.domain] = (domainCounts[a.domain] || 0) + 1);
-    // Fix: Explicitly cast entries to fix arithmetic type errors for b[1] - a[1]
-    const dominant = ((Object.entries(domainCounts) as [string, number][]).sort((a, b) => Number(b[1]) - Number(a[1]))[0]?.[0] || 'None') as Domain;
+    // Fix: Cast values to number explicitly to ensure correct arithmetic subtraction
+    const dominant = ((Object.entries(domainCounts) as [string, number][]).sort((a, b) => (b[1] as number) - (a[1] as number))[0]?.[0] || 'None') as Domain;
 
     // Top Tasks
     const taskCounts: Record<string, number> = {};
     weekActs.forEach(a => taskCounts[a.name] = (taskCounts[a.name] || 0) + 1);
+    // Fix: Cast values to number explicitly to ensure correct arithmetic subtraction
     const topThree = (Object.entries(taskCounts) as [string, number][])
-      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .sort((a, b) => (b[1] as number) - (a[1] as number))
       .slice(0, 3)
       .map(([name]) => name);
 
@@ -281,8 +309,8 @@ function App() {
     const today = new Date();
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today);
-      // Fix: Ensure i is treated as a number for arithmetic operation
-      d.setDate(today.getDate() - (i as number));
+      // Fix: today.getDate() is a number, subtracting number i. Ensure it's not treated as non-numeric.
+      d.setDate(today.getDate() - i);
       dates.push(d.toISOString().split('T')[0]);
     }
     return dates;
@@ -347,7 +375,7 @@ function App() {
         setActivities(prev => prev.map(a => a.id === id ? { ...a, status } : a));
         setCompletingId(null);
         setExpandingActivityId(null);
-      }, 600); // Wait for the fade-out/slide-up animation
+      }, 600); 
     } else if (status === 'partial') {
       const act = activities.find(a => a.id === id);
       if (act) {
@@ -410,7 +438,6 @@ function App() {
             <section className="zen-card glass-card">
               <header className="zen-header">
                 <h3>FOCUS FLOW</h3>
-                <div className="zen-weather-badge">{intelligence.weather}</div>
               </header>
               <div className="zen-todo-input-group">
                 <input 
@@ -444,13 +471,30 @@ function App() {
             <section className="zen-card glass-card">
               <header className="zen-header">
                 <h3>SIGNALS</h3>
-                <button className="zen-minimal-refresh" onClick={fetchIntelligence}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '6px' }}>
-                    <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                  </svg>
-                  SYNC
-                </button>
+                <div className="zen-signals-meta">
+                  <div className="zen-weather-badge">{intelligence.weather}</div>
+                  <button className="zen-minimal-refresh" onClick={fetchIntelligence}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '6px' }}>
+                      <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                    </svg>
+                    SYNC
+                  </button>
+                </div>
               </header>
+              <div className="zen-location-field">
+                 <input 
+                    type="text" 
+                    value={userLocation} 
+                    onChange={e => setUserLocation(e.target.value)} 
+                    placeholder="Set location for weather..." 
+                 />
+                 <button className="zen-gps-btn" onClick={detectLocation} title="Detect Location">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                      <circle cx="12" cy="10" r="3" />
+                    </svg>
+                 </button>
+              </div>
               <div className="zen-intelligence custom-scroll">
                 <div className="zen-news-feed">
                    {intelligence.news.split('\n').map((line, i) => (
@@ -762,9 +806,18 @@ function App() {
             <header><h2>Life Configuration</h2><button onClick={() => setIsDrawerOpen(false)}>×</button></header>
             <div className="os-drawer-scroll">
               <div className="os-input-field">
+                <label>Default Location (Geo-Context)</label>
+                <input 
+                  type="text" 
+                  value={userLocation} 
+                  onChange={e => setUserLocation(e.target.value)} 
+                  placeholder="e.g. London, UK"
+                />
+              </div>
+              <div className="os-input-field">
                 <label>Current Phase Objective</label>
-                {/* Fix: Explicitly type p to LifePeriod[] to resolve Property 'map' does not exist on type 'unknown' */}
-                <input type="text" value={activePeriod?.title || ''} onChange={e => setLifePeriods((p: LifePeriod[]) => p.map(x => x.id === activePeriodId ? {...x, title: e.target.value} : x))} />
+                {/* Fix: Explicitly cast the updater argument to 'any' to avoid the 'unknown' map error */}
+                <input type="text" value={activePeriod?.title || ''} onChange={e => setLifePeriods((p: any) => p.map((x: LifePeriod) => x.id === activePeriodId ? {...x, title: e.target.value} : x))} />
               </div>
               <div className="os-input-field">
                 <label>Domain Bias (System Weights)</label>
