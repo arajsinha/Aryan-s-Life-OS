@@ -571,7 +571,7 @@ function App() {
               </header>
               <div className="zen-intelligence custom-scroll">
                 <div className="zen-news-feed">
-                   {intelligence.news.split('\n').filter(line => line.trim() !== '').map((line, i) => (
+                   {intelligence.news.split('\n').map((line, i) => (
                      <div key={i} className="news-line">{line}</div>
                    ))}
                 </div>
