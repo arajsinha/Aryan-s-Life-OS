@@ -5,7 +5,7 @@
 */
 
 import { GoogleGenAI, Type } from '@google/genai';
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 import { Activity, LifePeriod, Domain, ActivityStatus } from './types';
 import { DOMAINS, DEFAULT_WEIGHTS, DOMAIN_COLORS } from './constants';
@@ -68,6 +68,7 @@ function App() {
   });
 
   const [userLocation, setUserLocation] = useState(() => localStorage.getItem('os_user_location') || '');
+  const lastFetchedLocation = useRef<string>('');
 
   // --- UI State ---
   const [activePeriodId] = useState<string>(lifePeriods[0]?.id || '');
@@ -102,7 +103,7 @@ function App() {
     newsSources: { uri: string; title: string }[];
   }>({
     news: 'Decrypting headlines...',
-    weather: 'Syncing climate...',
+    weather: 'Location unset',
     newsSources: [],
   });
 
@@ -138,7 +139,10 @@ function App() {
           contents: `I am at coordinates ${latitude}, ${longitude}. What is the city and region name? Return ONLY the city and region name, nothing else.`,
         });
         const loc = resp.text?.trim();
-        if (loc) setUserLocation(loc);
+        if (loc) {
+          setUserLocation(loc);
+          setToast(`Location: ${loc}`);
+        }
       } catch (e) {
         console.error("Geocoding failed", e);
       }
@@ -146,7 +150,7 @@ function App() {
   };
 
   // --- Intelligence Fetching ---
-  const fetchIntelligence = async () => {
+  const fetchIntelligence = async (forceWeather: boolean = false) => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const now = new Date();
@@ -170,19 +174,24 @@ function App() {
         .filter(c => c.web)
         .map(c => ({ uri: c.web?.uri || '', title: c.web?.title || 'Source' }));
 
-      const weatherPrompt = userLocation 
-        ? `Provide the current weather for ${userLocation}. Extremely brief, e.g. '${userLocation}: Sunny • 21°C'.`
-        : "Provide the current weather AND the location name for my approximate area. Extremely brief, e.g. 'San Francisco: Sunny • 21°C'.";
-
-      const weatherResp = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: weatherPrompt,
-        config: { tools: [{ googleSearch: {} }] }
-      });
+      let weatherText = intelligence.weather;
+      // Only fetch weather if location set and it's either forced or location changed
+      if (userLocation && (forceWeather || userLocation !== lastFetchedLocation.current)) {
+        const weatherPrompt = `Provide the current weather for ${userLocation}. Extremely brief, e.g. 'Sunny • 21°C'. Do NOT repeat the city name if you can avoid it.`;
+        const weatherResp = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: weatherPrompt,
+          config: { tools: [{ googleSearch: {} }] }
+        });
+        weatherText = weatherResp.text?.trim() || 'Unknown';
+        lastFetchedLocation.current = userLocation;
+      } else if (!userLocation) {
+        weatherText = 'Location unset';
+      }
 
       setIntelligence({
         news: newsResp.text || 'Unable to load news.',
-        weather: weatherResp.text || 'Unknown Location',
+        weather: weatherText,
         newsSources,
       });
       setToast('Intelligence Sync Complete');
@@ -194,7 +203,10 @@ function App() {
   };
 
   useEffect(() => {
-    if (isSidebarOpen) fetchIntelligence();
+    if (isSidebarOpen) {
+      // Auto fetch news, but only fetch weather if it's the first time or location changed
+      fetchIntelligence();
+    }
   }, [isSidebarOpen]);
 
   // --- Computed Views ---
@@ -484,32 +496,29 @@ function App() {
 
         <div className="zen-content">
           <div className="zen-col">
-            {/* Weather Card */}
-            <section className="zen-card glass-card zen-weather-card">
+            {/* Weather Card - The requested 'Small Box' */}
+            <section className="zen-card glass-card zen-weather-small-box">
               <header className="zen-header">
                 <h3>CLIMATE</h3>
-                <button className="zen-minimal-refresh" onClick={fetchIntelligence}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                    <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                  </svg>
-                </button>
-              </header>
-              <div className="zen-weather-display">
-                <div className="zen-weather-badge-v2">{intelligence.weather}</div>
-                <div className="zen-location-field">
-                  <input 
-                      type="text" 
-                      value={userLocation} 
-                      onChange={e => setUserLocation(e.target.value)} 
-                      placeholder="Set location..." 
-                  />
-                  <button className="zen-gps-btn" onClick={detectLocation} title="Detect Location">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                        <circle cx="12" cy="10" r="3" />
-                      </svg>
+                <div className="zen-signals-meta">
+                   <button className="zen-minimal-refresh" onClick={() => fetchIntelligence(true)}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                    </svg>
                   </button>
                 </div>
+              </header>
+              <div className="zen-weather-box-inner">
+                <div className="weather-primary">
+                  <span className="weather-location-label">{userLocation || 'Location Unset'}</span>
+                  <div className="zen-weather-badge-v2">{intelligence.weather}</div>
+                </div>
+                <button className="zen-gps-btn-v2" onClick={detectLocation} title="Detect Location">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                      <circle cx="12" cy="10" r="3" />
+                    </svg>
+                </button>
               </div>
             </section>
 
@@ -552,7 +561,7 @@ function App() {
               <header className="zen-header">
                 <h3>SIGNALS</h3>
                 <div className="zen-signals-meta">
-                  <button className="zen-minimal-refresh" onClick={fetchIntelligence}>
+                  <button className="zen-minimal-refresh" onClick={() => fetchIntelligence()}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '6px' }}>
                       <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
                     </svg>
@@ -562,7 +571,7 @@ function App() {
               </header>
               <div className="zen-intelligence custom-scroll">
                 <div className="zen-news-feed">
-                   {intelligence.news.split('\n').map((line, i) => (
+                   {intelligence.news.split('\n').filter(line => line.trim() !== '').map((line, i) => (
                      <div key={i} className="news-line">{line}</div>
                    ))}
                 </div>
