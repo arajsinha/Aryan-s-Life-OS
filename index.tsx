@@ -119,11 +119,18 @@ function App() {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const now = new Date();
-      const todayStr = now.toDateString();
+      const todayFull = now.toDateString();
+      const currentYear = now.getFullYear();
       
       const newsResp = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Today is ${todayStr}. Fetch the top 2 absolute latest news headlines for TODAY and the 3 most significant stories from THIS WEEK. Categories: AI/Tech, World News, and Indian Politics. Do NOT use markdown symbols like ### or **. Use plain text labels like 'TODAY:', 'THIS WEEK:', 'AI:', etc. Be concise.`,
+        contents: `CONTEXT: Today is ${todayFull}, year ${currentYear}. 
+        TASK: Fetch exactly the latest news for TODAY and significant events from THIS WEEK. 
+        FORMAT:
+        1. List 2 major headlines for TODAY (prefix with "TODAY [Date]:").
+        2. List 3 major headlines for THIS WEEK (prefix with "THIS WEEK [Date]:").
+        CATEGORIES: AI/Tech, World News, Politics. 
+        RULES: No markdown like ### or **. Include the specific date for every headline. Be concise. Do not fetch news from previous years.`,
         config: { tools: [{ googleSearch: {} }] }
       });
 
@@ -134,13 +141,13 @@ function App() {
 
       const weatherResp = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: "Current weather for my approximate location. Extremely brief, e.g. 'Cloudy • 22°C'.",
+        contents: "Provide the current weather AND the location name for my approximate area. Extremely brief, e.g. 'San Francisco: Sunny • 21°C'.",
         config: { tools: [{ googleSearch: {} }] }
       });
 
       setIntelligence({
         news: newsResp.text || 'Unable to load news.',
-        weather: weatherResp.text || 'Unknown',
+        weather: weatherResp.text || 'Unknown Location',
         newsSources,
       });
     } catch (e) {
@@ -254,13 +261,14 @@ function App() {
     // Dominant Domain
     const domainCounts: Record<string, number> = {} as any;
     weekActs.forEach(a => domainCounts[a.domain] = (domainCounts[a.domain] || 0) + 1);
-    const dominant = (Object.entries(domainCounts).sort((a, b) => (b[1] as any) - (a[1] as any))[0]?.[0] || 'None') as Domain;
+    // Fix: Explicitly cast entries to fix arithmetic type errors for b[1] - a[1]
+    const dominant = ((Object.entries(domainCounts) as [string, number][]).sort((a, b) => Number(b[1]) - Number(a[1]))[0]?.[0] || 'None') as Domain;
 
     // Top Tasks
     const taskCounts: Record<string, number> = {};
     weekActs.forEach(a => taskCounts[a.name] = (taskCounts[a.name] || 0) + 1);
-    const topThree = Object.entries(taskCounts)
-      .sort((a, b) => b[1] - a[1])
+    const topThree = (Object.entries(taskCounts) as [string, number][])
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
       .slice(0, 3)
       .map(([name]) => name);
 
@@ -273,7 +281,8 @@ function App() {
     const today = new Date();
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today);
-      d.setDate(today.getDate() - i);
+      // Fix: Ensure i is treated as a number for arithmetic operation
+      d.setDate(today.getDate() - (i as number));
       dates.push(d.toISOString().split('T')[0]);
     }
     return dates;
@@ -389,7 +398,7 @@ function App() {
       </div>
 
       {/* 2. ZEN SIDEBAR */}
-      <div className={`os-zen-sidebar custom-scroll ${isSidebarOpen ? 'is-open' : ''}`}>
+      <div className={`os-zen-sidebar ${isSidebarOpen ? 'is-open' : ''}`}>
         <button className="os-close-btn" onClick={() => setIsSidebarOpen(false)}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -754,7 +763,8 @@ function App() {
             <div className="os-drawer-scroll">
               <div className="os-input-field">
                 <label>Current Phase Objective</label>
-                <input type="text" value={activePeriod?.title || ''} onChange={e => setLifePeriods(p => p.map(x => x.id === activePeriodId ? {...x, title: e.target.value} : x))} />
+                {/* Fix: Explicitly type p to LifePeriod[] to resolve Property 'map' does not exist on type 'unknown' */}
+                <input type="text" value={activePeriod?.title || ''} onChange={e => setLifePeriods((p: LifePeriod[]) => p.map(x => x.id === activePeriodId ? {...x, title: e.target.value} : x))} />
               </div>
               <div className="os-input-field">
                 <label>Domain Bias (System Weights)</label>
