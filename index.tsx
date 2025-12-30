@@ -73,11 +73,13 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [heatmapView, setHeatmapView] = useState<'day' | 'week' | 'month'>('day');
   const [plannerInput, setPlannerInput] = useState('');
+  const [isPlannerFocused, setIsPlannerFocused] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [previewActivity, setPreviewActivity] = useState<Activity | null>(null);
   const [expandingActivityId, setExpandingActivityId] = useState<string | null>(null);
   const [hoveredTask, setHoveredTask] = useState<Activity | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [completingId, setCompletingId] = useState<string | null>(null);
 
   // --- Sidebar Specific State ---
   const [todos, setTodos] = useState<{id: string, text: string, done: boolean}[]>(() => {
@@ -166,6 +168,111 @@ function App() {
     return groups;
   }, [activities]);
 
+  // --- Priority Alignment Insight ---
+  const priorityInsight = useMemo(() => {
+    if (!activePeriod || activities.length === 0) {
+      return { status: 'neutral', message: 'Operational baseline active.' };
+    }
+
+    const domainDistribution: Record<Domain, number> = {
+      Work: 0, Health: 0, Sleep: 0, Leisure: 0, Relationships: 0
+    };
+    
+    activities.forEach(a => {
+      domainDistribution[a.domain] += 1;
+    });
+
+    const total = activities.length;
+    const actualPercentages = Object.fromEntries(
+      Object.entries(domainDistribution).map(([d, count]) => [d, (count / total) * 100])
+    ) as Record<Domain, number>;
+
+    // Find largest negative delta (deficit)
+    let maxDeficit = -1;
+    let deficitDomain: Domain | null = null;
+
+    Object.entries(activePeriod.weights).forEach(([d, target]) => {
+      const actual = actualPercentages[d as Domain];
+      const delta = target - actual;
+      if (delta > maxDeficit) {
+        maxDeficit = delta;
+        deficitDomain = d as Domain;
+      }
+    });
+
+    if (maxDeficit > 15 && deficitDomain) {
+      return {
+        status: 'warning',
+        message: `Prioritize ${deficitDomain}. Current allocation lags target by ${Math.round(maxDeficit)}%.`
+      };
+    }
+
+    // Find largest positive delta (over-indexing)
+    let maxSurplus = -1;
+    let surplusDomain: Domain | null = null;
+    Object.entries(activePeriod.weights).forEach(([d, target]) => {
+      const actual = actualPercentages[d as Domain];
+      const delta = actual - target;
+      if (delta > 20) {
+        maxSurplus = delta;
+        surplusDomain = d as Domain;
+      }
+    });
+
+    if (maxSurplus > 20 && surplusDomain) {
+      return {
+        status: 'caution',
+        message: `${surplusDomain} dominance detected. System approaching imbalance.`
+      };
+    }
+
+    return { status: 'aligned', message: 'Current actions reflect phase priorities.' };
+  }, [activities, activePeriod]);
+
+  // --- Temporal Map Summary Logic ---
+  const weekSummary = useMemo(() => {
+    if (heatmapView !== 'week') return null;
+
+    const today = new Date();
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - 6);
+    weekStart.setHours(0,0,0,0);
+    
+    const weekActs = activities.filter(a => {
+      const d = new Date(a.date);
+      return d >= weekStart && d <= today;
+    });
+
+    if (weekActs.length === 0) return { dominant: 'None', topThree: [] };
+
+    // Dominant Domain
+    const domainCounts: Record<string, number> = {} as any;
+    weekActs.forEach(a => domainCounts[a.domain] = (domainCounts[a.domain] || 0) + 1);
+    const dominant = (Object.entries(domainCounts).sort((a, b) => (b[1] as any) - (a[1] as any))[0]?.[0] || 'None') as Domain;
+
+    // Top Tasks
+    const taskCounts: Record<string, number> = {};
+    weekActs.forEach(a => taskCounts[a.name] = (taskCounts[a.name] || 0) + 1);
+    const topThree = Object.entries(taskCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name]) => name);
+
+    return { dominant, topThree };
+  }, [activities, heatmapView]);
+
+  const weekGridData = useMemo(() => {
+    if (heatmapView !== 'week') return [];
+    const dates = [];
+    const today = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      dates.push(d.toISOString().split('T')[0]);
+    }
+    return dates;
+  }, [heatmapView]);
+
   // --- Logic Handlers ---
   const handleParseActivity = async () => {
     if (!plannerInput.trim() || isProcessing) return;
@@ -219,8 +326,17 @@ function App() {
   };
 
   const updateActivityStatus = (id: string, status: ActivityStatus) => {
-    setActivities(prev => prev.map(a => a.id === id ? { ...a, status } : a));
-    setExpandingActivityId(null);
+    if (status === 'complete') {
+      setCompletingId(id);
+      setTimeout(() => {
+        setActivities(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+        setCompletingId(null);
+        setExpandingActivityId(null);
+      }, 600); // Wait for the fade-out/slide-up animation
+    } else {
+      setActivities(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+      setExpandingActivityId(null);
+    }
   };
 
   const deleteActivity = (id: string) => {
@@ -272,7 +388,12 @@ function App() {
                   onKeyDown={e => e.key === 'Enter' && addTodo()}
                   placeholder="Queue new objective..." 
                 />
-                <button onClick={addTodo} className="zen-accent-btn">Add</button>
+                <button onClick={addTodo} className="zen-accent-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '6px' }}>
+                    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  ADD
+                </button>
               </div>
               <div className="zen-todo-list custom-scroll">
                 {todos.length === 0 && <p className="os-muted">No pending tasks for this flow.</p>}
@@ -291,7 +412,12 @@ function App() {
             <section className="zen-card glass-card">
               <header className="zen-header">
                 <h3>SIGNALS</h3>
-                <button className="zen-minimal-refresh" onClick={fetchIntelligence}>SYNC</button>
+                <button className="zen-minimal-refresh" onClick={fetchIntelligence}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '6px' }}>
+                    <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                  SYNC
+                </button>
               </header>
               <div className="zen-intelligence custom-scroll">
                 <div className="zen-news-feed">
@@ -326,15 +452,27 @@ function App() {
 
       {/* 3. MAIN DASHBOARD */}
       <div className="os-main">
-        <header className={`os-status-banner ${integrityScore > 70 ? 'is-aligned' : 'is-neutral'}`}>
-          <div className="banner-icon">
-             <div className="pulse-circle" />
-          </div>
-          <div className="banner-text">
-            <h2>Integrity Engine</h2>
-            <p>{integrityScore}% congruence between intent and action.</p>
-          </div>
-        </header>
+        <div className="os-banner-row">
+          <header className={`os-status-banner ${integrityScore > 70 ? 'is-aligned' : 'is-neutral'}`}>
+            <div className="banner-icon">
+               <div className="pulse-circle" />
+            </div>
+            <div className="banner-text">
+              <h2>Integrity Engine</h2>
+              <p>{integrityScore}% congruence.</p>
+            </div>
+          </header>
+
+          <header className={`os-status-banner os-insight-banner is-${priorityInsight.status}`}>
+            <div className="banner-icon">
+               <div className="pulse-circle" />
+            </div>
+            <div className="banner-text">
+              <h2>Priority Insight</h2>
+              <p>{priorityInsight.message}</p>
+            </div>
+          </header>
+        </div>
 
         <div className="os-dashboard-grid">
           {/* Metrics */}
@@ -347,7 +485,7 @@ function App() {
             </div>
           </section>
 
-          <section className="os-card glass-card col-span-2">
+          <section className={`os-card glass-card col-span-2 ${isPlannerFocused || plannerInput || previewActivity ? 'is-focused' : ''}`}>
             <h3>Intent Planner</h3>
             <div className="os-planner-area">
               {previewActivity ? (
@@ -371,6 +509,8 @@ function App() {
                     className="os-textarea-v2"
                     value={plannerInput} 
                     onChange={e => setPlannerInput(e.target.value)} 
+                    onFocus={() => setIsPlannerFocused(true)}
+                    onBlur={() => setIsPlannerFocused(false)}
                     placeholder="Capture your next move... e.g. 'Read for 45 mins after work tomorrow'"
                     disabled={isProcessing}
                   />
@@ -383,7 +523,7 @@ function App() {
           </section>
 
           {/* Schedule */}
-          <section className="os-card glass-card col-span-2">
+          <section className={`os-card glass-card col-span-2 ${expandingActivityId ? 'is-focused' : ''}`}>
             <h3>Execution Queue</h3>
             <div className="os-schedule-viewport custom-scroll">
               {Object.entries(activitiesByDate).length === 0 ? (
@@ -395,10 +535,11 @@ function App() {
                     <div className="segment-items">
                       {items.map(a => {
                         const isExpanded = expandingActivityId === a.id;
+                        const isCompleting = completingId === a.id;
                         const statusColor = a.status === 'complete' ? '#10b981' : a.status === 'cancel' ? '#ef4444' : '#fff';
 
                         return (
-                          <div key={a.id} className={`os-activity-row ${isExpanded ? 'is-expanded' : ''}`}>
+                          <div key={a.id} className={`os-activity-row ${isExpanded ? 'is-expanded' : ''} ${isCompleting ? 'is-completing' : ''} status-${a.status}`}>
                             <div className="row-indicator" style={{ background: DOMAIN_COLORS[a.domain] }} />
                             <div className="row-main">
                                <div className="row-header">
@@ -478,8 +619,56 @@ function App() {
                     ))}
                   </div>
                 )}
-                {/* Week/Month views truncated for brevity, same refined style */}
-                {(heatmapView === 'week' || heatmapView === 'month') && (
+                
+                {heatmapView === 'week' && (
+                  <div className="os-heatmap-week-container">
+                    <div className="os-grid-week">
+                      {weekGridData.map((date, idx) => (
+                        <div key={date} className="os-week-col">
+                          <div className="os-week-slots">
+                            {Array.from({ length: 24 }).map((_, h) => {
+                               const timeStr = `${h.toString().padStart(2, '0')}:00`;
+                               const act = activities.find(a => a.date === date && timeStr >= a.startTime && timeStr < a.endTime);
+                               return (
+                                 <div 
+                                   key={h} 
+                                   className={`week-dot ${act ? 'active' : ''}`} 
+                                   style={act ? { background: DOMAIN_COLORS[act.domain] } : {}}
+                                   onMouseMove={e => { setHoveredTask(act || null); setMousePos({ x: e.clientX, y: e.clientY }); }}
+                                   onMouseLeave={() => setHoveredTask(null)}
+                                 />
+                               );
+                            })}
+                          </div>
+                          <span className="week-label">{['M', 'T', 'W', 'T', 'F', 'S', 'S'][idx]}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {weekSummary && (
+                      <div className="os-view-summary animate-fade-in">
+                        <div className="summary-section">
+                           <label>Dominant Domain</label>
+                           <div className="summary-val">
+                             <DomainIcon domain={weekSummary.dominant as Domain} />
+                             <span>{weekSummary.dominant}</span>
+                           </div>
+                        </div>
+                        <div className="summary-section">
+                           <label>Top Objectives</label>
+                           <div className="summary-tags">
+                             {weekSummary.topThree.length > 0 ? (
+                               weekSummary.topThree.map(t => <span key={t} className="summary-tag">{t}</span>)
+                             ) : (
+                               <span className="os-muted">None detected</span>
+                             )}
+                           </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {heatmapView === 'month' && (
                   <div className="os-placeholder-view">View transition active...</div>
                 )}
              </div>
