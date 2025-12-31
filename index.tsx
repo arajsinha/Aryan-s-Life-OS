@@ -1,4 +1,3 @@
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -80,15 +79,8 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [previewActivity, setPreviewActivity] = useState<Activity | null>(null);
   const [expandingActivityId, setExpandingActivityId] = useState<string | null>(null);
-  const [hoveredTask, setHoveredTask] = useState<Activity | null>(null);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [completingId, setCompletingId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   
-  // Partial Capture State
-  const [partialTarget, setPartialTarget] = useState<Activity | null>(null);
-  const [partialTimes, setPartialTimes] = useState({ start: '', end: '' });
-
   // --- Sidebar Specific State ---
   const [todos, setTodos] = useState<{id: string, text: string, done: boolean}[]>(() => {
     const saved = localStorage.getItem('sidebar_todos');
@@ -141,7 +133,7 @@ function App() {
         const loc = resp.text?.trim();
         if (loc) {
           setUserLocation(loc);
-          setToast(`Location: ${loc}`);
+          setToast(`Location Detected: ${loc}`);
         }
       } catch (e) {
         console.error("Geocoding failed", e);
@@ -159,13 +151,7 @@ function App() {
       
       const newsResp = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `CONTEXT: Today is ${todayFull}, year ${currentYear}. 
-        TASK: Fetch exactly the latest news for TODAY and significant events from THIS WEEK. 
-        FORMAT:
-        1. List 2 major headlines for TODAY (prefix with "TODAY [Date]:").
-        2. List 3 major headlines for THIS WEEK (prefix with "THIS WEEK [Date]:").
-        CATEGORIES: AI/Tech, World News, Politics. 
-        RULES: No markdown like ### or **. Include the specific date for every headline. Be concise. Do not fetch news from previous years.`,
+        contents: `CONTEXT: Today is ${todayFull}, year ${currentYear}. Latest news for tech and world.`,
         config: { tools: [{ googleSearch: {} }] }
       });
 
@@ -175,18 +161,14 @@ function App() {
         .map(c => ({ uri: c.web?.uri || '', title: c.web?.title || 'Source' }));
 
       let weatherText = intelligence.weather;
-      // Only fetch weather if location set and it's either forced or location changed
       if (userLocation && (forceWeather || userLocation !== lastFetchedLocation.current)) {
-        const weatherPrompt = `Provide the current weather for ${userLocation}. Extremely brief, e.g. 'Sunny • 21°C'. Do NOT repeat the city name if you can avoid it.`;
         const weatherResp = await ai.models.generateContent({
           model: 'gemini-3-flash-preview',
-          contents: weatherPrompt,
+          contents: `Weather for ${userLocation}. Extremely brief, e.g. 'Sunny • 21°C'.`,
           config: { tools: [{ googleSearch: {} }] }
         });
         weatherText = weatherResp.text?.trim() || 'Unknown';
         lastFetchedLocation.current = userLocation;
-      } else if (!userLocation) {
-        weatherText = 'Location unset';
       }
 
       setIntelligence({
@@ -204,10 +186,16 @@ function App() {
 
   useEffect(() => {
     if (isSidebarOpen) {
-      // Auto fetch news, but only fetch weather if it's the first time or location changed
       fetchIntelligence();
     }
   }, [isSidebarOpen]);
+
+  // Trigger weather refresh when userLocation changes via dialog
+  useEffect(() => {
+    if (userLocation && userLocation !== lastFetchedLocation.current && isSidebarOpen) {
+      fetchIntelligence(true);
+    }
+  }, [userLocation]);
 
   // --- Computed Views ---
   const activePeriod = useMemo(() => 
@@ -221,6 +209,18 @@ function App() {
     return Math.round(((completed + partial * 0.5) / activities.length) * 100);
   }, [activities]);
 
+  // Priority Insight logic
+  const priorityInsight = useMemo(() => {
+    if (!activePeriod || activities.length === 0) return { status: 'neutral', message: 'Operational baseline active.' };
+    const dominantDomain = (Object.entries(activePeriod.weights).reduce((a, b) => a[1] > b[1] ? a : b)[0]) as Domain;
+    const relevantActivities = activities.filter(a => a.domain === dominantDomain);
+    const alignment = relevantActivities.length > 0 ? Math.round((relevantActivities.filter(a => a.status === 'complete').length / relevantActivities.length) * 100) : 0;
+    
+    if (alignment > 80) return { status: 'aligned', message: `High performance in ${dominantDomain}.` };
+    if (alignment > 40) return { status: 'neutral', message: `Focus on ${dominantDomain} is moderate.` };
+    return { status: 'divergent', message: `${dominantDomain} focus needs reinforcement.` };
+  }, [activities, activePeriod]);
+
   const activitiesByDate = useMemo(() => {
     const groups: Record<string, Activity[]> = {};
     [...activities].sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)).forEach(a => {
@@ -230,142 +230,94 @@ function App() {
     return groups;
   }, [activities]);
 
-  // --- Priority Alignment Insight ---
-  const priorityInsight = useMemo(() => {
-    if (!activePeriod || activities.length === 0) {
-      return { status: 'neutral', message: 'Operational baseline active.' };
+  // --- Temporal Map Rendering Logic ---
+  const renderTemporalMap = () => {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+
+    if (heatmapView === 'day') {
+      const hourlyData = Array.from({ length: 24 }).map((_, hour) => {
+        const hourStr = hour.toString().padStart(2, '0');
+        return activities.filter(a => a.date === todayStr && a.startTime.startsWith(hourStr));
+      });
+
+      return (
+        <div className="os-grid-day">
+          {hourlyData.map((acts, h) => (
+            <div key={h} className="os-hour-cell">
+              <span className="cell-label">{h}:00</span>
+              <div className="cell-indicators">
+                {acts.map(a => (
+                  <div key={a.id} className="cell-dot active" style={{ backgroundColor: DOMAIN_COLORS[a.domain] }} title={a.name} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
     }
 
-    const domainDistribution: Record<Domain, number> = {
-      Work: 0, Health: 0, Sleep: 0, Leisure: 0, Relationships: 0
-    };
-    
-    activities.forEach(a => {
-      domainDistribution[a.domain] += 1;
-    });
-
-    const total = activities.length;
-    const actualPercentages = Object.fromEntries(
-      Object.entries(domainDistribution).map(([d, count]) => [d, (count / total) * 100])
-    ) as Record<Domain, number>;
-
-    // Find largest negative delta (deficit)
-    let maxDeficit = -1;
-    let deficitDomain: Domain | null = null;
-
-    Object.entries(activePeriod.weights).forEach(([d, target]) => {
-      const actual = actualPercentages[d as Domain];
-      const delta = target - actual;
-      if (delta > maxDeficit) {
-        maxDeficit = delta;
-        deficitDomain = d as Domain;
+    if (heatmapView === 'week') {
+      const days = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        days.push(d.toISOString().split('T')[0]);
       }
-    });
 
-    if (maxDeficit > 15 && deficitDomain) {
-      return {
-        status: 'warning',
-        message: `Prioritize ${deficitDomain}. Current allocation lags target by ${Math.round(maxDeficit)}%.`
-      };
+      return (
+        <div className="os-grid-week">
+          {days.map(date => {
+            const dayActs = activities.filter(a => a.date === date);
+            const dayName = new Date(date).toLocaleDateString('en-US', { weekday: 'short' });
+            return (
+              <div key={date} className="os-week-col">
+                <span className="cell-label">{dayName}</span>
+                <div className="os-week-bar">
+                  {dayActs.map(a => (
+                    <div key={a.id} className="bar-segment" style={{ backgroundColor: DOMAIN_COLORS[a.domain] }} title={a.name} />
+                  ))}
+                  {dayActs.length === 0 && <div className="bar-empty" />}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
     }
 
-    // Find largest positive delta (over-indexing)
-    let maxSurplus = -1;
-    let surplusDomain: Domain | null = null;
-    Object.entries(activePeriod.weights).forEach(([d, target]) => {
-      const actual = actualPercentages[d as Domain];
-      const delta = actual - target;
-      if (delta > 20) {
-        maxSurplus = delta;
-        surplusDomain = d as Domain;
+    if (heatmapView === 'month') {
+      const dates = [];
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+      const firstDay = new Date(currentYear, currentMonth, 1);
+      const lastDay = new Date(currentYear, currentMonth + 1, 0);
+      
+      // Padding for calendar
+      for (let i = 0; i < firstDay.getDay(); i++) dates.push(null);
+      for (let i = 1; i <= lastDay.getDate(); i++) {
+        dates.push(new Date(currentYear, currentMonth, i).toISOString().split('T')[0]);
       }
-    });
 
-    if (maxSurplus > 20 && surplusDomain) {
-      return {
-        status: 'caution',
-        message: `${surplusDomain} dominance detected. System approaching imbalance.`
-      };
+      return (
+        <div className="os-grid-month">
+          {['S','M','T','W','T','F','S'].map(d => <div key={d} className="cell-label">{d}</div>)}
+          {dates.map((date, idx) => {
+            if (!date) return <div key={`empty-${idx}`} className="os-month-cell empty" />;
+            const dayActs = activities.filter(a => a.date === date);
+            const intensity = Math.min(dayActs.length * 0.2, 1);
+            const isToday = date === todayStr;
+            return (
+              <div key={date} className={`os-month-cell ${isToday ? 'is-today' : ''}`} style={{ backgroundColor: dayActs.length > 0 ? `rgba(59, 130, 246, ${0.1 + intensity * 0.4})` : 'transparent' }}>
+                <span className="month-day-num">{new Date(date).getDate()}</span>
+                {dayActs.length > 0 && <div className="month-dot" />}
+              </div>
+            );
+          })}
+        </div>
+      );
     }
-
-    return { status: 'aligned', message: 'Current actions reflect phase priorities.' };
-  }, [activities, activePeriod]);
-
-  // --- Temporal Map Logic ---
-  const weekSummary = useMemo(() => {
-    if (heatmapView !== 'week') return null;
-
-    const today = new Date();
-    const weekStart = new Date(today);
-    weekStart.setDate(today.getDate() - 6);
-    weekStart.setHours(0,0,0,0);
-    
-    const weekActs = activities.filter(a => {
-      const d = new Date(a.date);
-      return d.getTime() >= weekStart.getTime() && d.getTime() <= today.getTime();
-    });
-
-    if (weekActs.length === 0) return { dominant: 'None', topThree: [] };
-
-    const domainCounts: Record<string, number> = {} as any;
-    weekActs.forEach(a => domainCounts[a.domain] = (domainCounts[a.domain] || 0) + 1);
-    const dominant = ((Object.entries(domainCounts) as [string, number][]).sort((a, b) => b[1] - a[1])[0]?.[0] || 'None') as Domain;
-
-    const taskCounts: Record<string, number> = {};
-    weekActs.forEach(a => taskCounts[a.name] = (taskCounts[a.name] || 0) + 1);
-    const topThree = (Object.entries(taskCounts) as [string, number][])
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([name]) => name);
-
-    return { dominant, topThree };
-  }, [activities, heatmapView]);
-
-  const weekGridData = useMemo(() => {
-    if (heatmapView !== 'week') return [];
-    const dates = [];
-    const today = new Date();
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(today.getDate() - i);
-      dates.push(d.toISOString().split('T')[0]);
-    }
-    return dates;
-  }, [heatmapView]);
-
-  const monthGridData = useMemo(() => {
-    if (heatmapView !== 'month') return [];
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = today.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    
-    const dates = [];
-    // Padding for Monday start
-    let startPadding = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
-    for(let i=0; i<startPadding; i++) dates.push(null);
-
-    for(let i=1; i<=lastDay.getDate(); i++) {
-      dates.push(new Date(year, month, i).toISOString().split('T')[0]);
-    }
-    return dates;
-  }, [heatmapView]);
-
-  const monthSummary = useMemo(() => {
-    if (heatmapView !== 'month') return null;
-    const today = new Date();
-    const monthStr = today.toISOString().slice(0, 7);
-    const monthActs = activities.filter(a => a.date.startsWith(monthStr));
-    
-    if (monthActs.length === 0) return { total: 0, dominant: 'None' };
-
-    const domainCounts: Record<string, number> = {} as any;
-    monthActs.forEach(a => domainCounts[a.domain] = (domainCounts[a.domain] || 0) + 1);
-    const dominant = ((Object.entries(domainCounts) as [string, number][]).sort((a, b) => b[1] - a[1])[0]?.[0] || 'None') as Domain;
-
-    return { total: monthActs.length, dominant };
-  }, [activities, heatmapView]);
+  };
 
   // --- Logic Handlers ---
   const handleParseActivity = async () => {
@@ -376,7 +328,7 @@ function App() {
       const now = new Date();
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Intent: "${plannerInput}". Context: ${now.toDateString()}, ${now.toLocaleTimeString()}. Current life phase: ${activePeriod?.title}. Priorities: ${JSON.stringify(activePeriod?.weights)}`,
+        contents: `Intent: "${plannerInput}". Context: ${now.toDateString()}. Priorities: ${JSON.stringify(activePeriod?.weights)}`,
         config: {
           responseMimeType: 'application/json',
           responseSchema: {
@@ -406,6 +358,7 @@ function App() {
       });
     } catch (e) {
       console.error(e);
+      setToast('Parse Failed');
     } finally {
       setIsProcessing(false);
     }
@@ -416,42 +369,12 @@ function App() {
       setActivities(prev => [...prev, previewActivity]);
       setPreviewActivity(null);
       setPlannerInput('');
+      setToast('Activity Committed');
     }
   };
 
   const updateActivityStatus = (id: string, status: ActivityStatus) => {
-    if (status === 'complete') {
-      setCompletingId(id);
-      setTimeout(() => {
-        setActivities(prev => prev.map(a => a.id === id ? { ...a, status } : a));
-        setCompletingId(null);
-        setExpandingActivityId(null);
-      }, 600); 
-    } else if (status === 'partial') {
-      const act = activities.find(a => a.id === id);
-      if (act) {
-        setPartialTarget(act);
-        setPartialTimes({ start: act.startTime, end: act.endTime });
-      }
-    } else {
-      setActivities(prev => prev.map(a => a.id === id ? { ...a, status } : a));
-      setExpandingActivityId(null);
-    }
-  };
-
-  const handleSavePartial = () => {
-    if (!partialTarget) return;
-    setActivities(prev => prev.map(a => 
-      a.id === partialTarget.id 
-      ? { ...a, status: 'partial', actualStartTime: partialTimes.start, actualEndTime: partialTimes.end } 
-      : a
-    ));
-    setPartialTarget(null);
-    setExpandingActivityId(null);
-  };
-
-  const deleteActivity = (id: string) => {
-    setActivities(prev => prev.filter(a => a.id !== id));
+    setActivities(prev => prev.map(a => a.id === id ? { ...a, status } : a));
     setExpandingActivityId(null);
   };
 
@@ -469,24 +392,16 @@ function App() {
   return (
     <div className={`os-container ${isSidebarOpen ? 'sidebar-active' : ''}`}>
       
-      {/* Toast Notification */}
       <div className={`os-toast ${toast ? 'is-visible' : ''}`}>
-        <div className="toast-content">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '8px' }}>
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-          {toast}
-        </div>
+        <div className="toast-content">{toast}</div>
       </div>
 
-      {/* 1. SIDEBAR TRIGGER */}
       <div className="os-sidebar-trigger" onClick={() => setIsSidebarOpen(true)}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           <polyline points="9 18 15 12 9 6" />
         </svg>
       </div>
 
-      {/* 2. ZEN SIDEBAR */}
       <div className={`os-zen-sidebar ${isSidebarOpen ? 'is-open' : ''}`}>
         <button className="os-close-btn" onClick={() => setIsSidebarOpen(false)}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -495,126 +410,78 @@ function App() {
         </button>
 
         <div className="zen-content">
-          <div className="zen-col">
-            {/* Weather Card - The requested 'Small Box' */}
-            <section className="zen-card glass-card zen-weather-small-box">
-              <header className="zen-header">
-                <h3>CLIMATE</h3>
-                <div className="zen-signals-meta">
-                   <button className="zen-minimal-refresh" onClick={() => fetchIntelligence(true)}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                      <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                    </svg>
-                  </button>
-                </div>
-              </header>
-              <div className="zen-weather-box-inner">
-                <div className="weather-primary">
-                  <span className="weather-location-label">{userLocation || 'Location Unset'}</span>
-                  <div className="zen-weather-badge-v2">{intelligence.weather}</div>
-                </div>
-                <button className="zen-gps-btn-v2" onClick={detectLocation} title="Detect Location">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                      <circle cx="12" cy="10" r="3" />
-                    </svg>
-                </button>
-              </div>
-            </section>
-
-            <section className="zen-card glass-card">
-              <header className="zen-header">
-                <h3>FOCUS FLOW</h3>
-              </header>
-              <div className="zen-todo-input-group">
-                <input 
-                  type="text" 
-                  value={todoInput} 
-                  onChange={e => setTodoInput(e.target.value)} 
-                  onKeyDown={e => e.key === 'Enter' && addTodo()}
-                  placeholder="Queue new objective..." 
-                />
-                <button onClick={addTodo} className="zen-accent-btn">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '6px' }}>
-                    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" />
+          {/* CLIMATE - Order 1 on Mobile */}
+          <section className="zen-card glass-card zen-weather-small-box zen-area-climate">
+            <header className="zen-header">
+              <h3>CLIMATE</h3>
+              <button className="zen-gps-btn-v2" onClick={detectLocation} title="Detect Location">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                    <circle cx="12" cy="10" r="3" />
                   </svg>
-                  ADD
-                </button>
+               </button>
+            </header>
+            <div className="zen-weather-box-inner">
+              <div className="weather-primary">
+                <span className="weather-location-label">{userLocation || 'Location Unset'}</span>
+                <div className="zen-weather-badge-v2">{intelligence.weather}</div>
               </div>
-              <div className="zen-todo-list custom-scroll">
-                {todos.length === 0 && <p className="os-muted">No pending tasks for this flow.</p>}
-                {todos.map(t => (
-                  <div key={t.id} className={`zen-todo-item ${t.done ? 'is-done' : ''}`} onClick={() => setTodos(todos.map(x => x.id === t.id ? {...x, done: !x.done} : x))}>
-                    <div className="zen-check" />
-                    <span>{t.text}</span>
-                    <button className="zen-trash" onClick={e => { e.stopPropagation(); setTodos(todos.filter(x => x.id !== t.id)); }}>
-                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
+            </div>
+          </section>
 
-          <div className="zen-col">
-            <section className="zen-card glass-card">
-              <header className="zen-header">
-                <h3>SIGNALS</h3>
-                <div className="zen-signals-meta">
-                  <button className="zen-minimal-refresh" onClick={() => fetchIntelligence()}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '6px' }}>
-                      <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                    </svg>
-                    REFRESH
-                  </button>
-                </div>
-              </header>
-              <div className="zen-intelligence custom-scroll">
-                <div className="zen-news-feed">
-                   {intelligence.news.split('\n').map((line, i) => (
-                     <div key={i} className="news-line">{line}</div>
-                   ))}
-                </div>
-                {intelligence.newsSources.length > 0 && (
-                  <div className="zen-sources">
-                    {intelligence.newsSources.slice(0, 3).map((s, i) => (
-                      <a key={i} href={s.uri} target="_blank" rel="noreferrer" className="zen-source-tag">{s.title.substring(0, 20)}...</a>
-                    ))}
-                  </div>
-                )}
+          {/* SIGNALS - Order 2 on Mobile */}
+          <section className="zen-card glass-card zen-area-signals">
+            <header className="zen-header">
+              <h3>SIGNALS</h3>
+              <button className="zen-minimal-refresh" onClick={() => fetchIntelligence(true)}>SYNC</button>
+            </header>
+            <div className="zen-intelligence custom-scroll">
+              <div className="zen-news-feed">
+                 {intelligence.news.split('\n').map((line, i) => <div key={i} className="news-line">{line}</div>)}
               </div>
-            </section>
+            </div>
+          </section>
 
-            <section className="zen-card glass-card fill-height">
-              <header className="zen-header"><h3>BRAINDUMP</h3></header>
-              <textarea 
-                className="zen-scratchpad-instrument" 
-                value={scratchpad} 
-                onChange={e => setScratchpad(e.target.value)} 
-                placeholder="Unprocessed thoughts, reflections, and fragments..."
-              />
-            </section>
-          </div>
+          {/* FOCUS FLOW - Order 3 on Mobile */}
+          <section className="zen-card glass-card zen-area-focus">
+            <header className="zen-header"><h3>FOCUS FLOW</h3></header>
+            <div className="zen-todo-input-group">
+              <input value={todoInput} onChange={e => setTodoInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && addTodo()} placeholder="Queue objective..." />
+              <button onClick={addTodo} className="zen-accent-btn">ADD</button>
+            </div>
+            <div className="zen-todo-list custom-scroll">
+              {todos.map(t => (
+                <div key={t.id} className={`zen-todo-item ${t.done ? 'is-done' : ''}`} onClick={() => setTodos(todos.map(x => x.id === t.id ? {...x, done: !x.done} : x))}>
+                  <div className="zen-check" />
+                  <span>{t.text}</span>
+                  <button className="zen-trash" onClick={e => { e.stopPropagation(); setTodos(todos.filter(x => x.id !== t.id)); }}>×</button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* SCRATCHPAD - Order 4 on Mobile */}
+          <section className="zen-card glass-card fill-height zen-area-scratch">
+            <header className="zen-header"><h3>SCRATCHPAD</h3></header>
+            <textarea 
+              className="zen-scratchpad-instrument custom-scroll" 
+              value={scratchpad} 
+              onChange={e => setScratchpad(e.target.value)} 
+              placeholder="Unstructured thoughts..." 
+            />
+          </section>
         </div>
       </div>
 
-      {/* 3. MAIN DASHBOARD */}
       <div className="os-main">
         <div className="os-banner-row">
           <header className={`os-status-banner ${integrityScore > 70 ? 'is-aligned' : 'is-neutral'}`}>
-            <div className="banner-icon">
-               <div className="pulse-circle" />
-            </div>
             <div className="banner-text">
               <h2>Integrity Engine</h2>
               <p>{integrityScore}% congruence.</p>
             </div>
           </header>
-
           <header className={`os-status-banner os-insight-banner is-${priorityInsight.status}`}>
-            <div className="banner-icon">
-               <div className="pulse-circle" />
-            </div>
             <div className="banner-text">
               <h2>Priority Insight</h2>
               <p>{priorityInsight.message}</p>
@@ -623,122 +490,57 @@ function App() {
         </div>
 
         <div className="os-dashboard-grid">
-          {/* Metrics */}
           <section className="os-card glass-card">
-            <h3>System Status</h3>
+            <h3>Status</h3>
             <div className="os-metric-box">
               <span className="metric-val-large">{integrityScore}<small>%</small></span>
               <div className="metric-track"><div className="metric-fill-v2" style={{ width: `${integrityScore}%` }} /></div>
-              <span className="os-muted-tiny">Daily Integrity Score</span>
             </div>
           </section>
 
-          <section className={`os-card glass-card col-span-2 ${isPlannerFocused || plannerInput || previewActivity ? 'is-focused' : ''}`}>
+          <section className="os-card glass-card col-span-2">
             <h3>Intent Planner</h3>
             <div className="os-planner-area">
               {previewActivity ? (
-                <div className="os-ai-preview-card animate-slide-up">
-                  <header>
-                    <div className="preview-domain-tag" style={{ borderLeftColor: DOMAIN_COLORS[previewActivity.domain] }}>
-                       {previewActivity.domain}
-                    </div>
-                    <span className="preview-time-tag">{formatDateLabel(previewActivity.date)} • {previewActivity.startTime}</span>
-                  </header>
+                <div className="os-ai-preview-card">
                   <h4>{previewActivity.name}</h4>
-                  <p className="preview-intent-text">"{previewActivity.intent}"</p>
                   <div className="os-preview-actions">
                     <button className="btn-secondary" onClick={() => setPreviewActivity(null)}>Discard</button>
-                    <button className="btn-primary-v2" onClick={confirmActivity}>Commit to Schedule</button>
+                    <button className="btn-primary-v2" onClick={confirmActivity}>Commit</button>
                   </div>
                 </div>
               ) : (
                 <div className="os-input-container">
-                  <textarea 
-                    className="os-textarea-v2"
-                    value={plannerInput} 
-                    onChange={e => setPlannerInput(e.target.value)} 
-                    onFocus={() => setIsPlannerFocused(true)}
-                    onBlur={() => setIsPlannerFocused(false)}
-                    placeholder="Capture your next move... e.g. 'Read for 45 mins after work tomorrow'"
-                    disabled={isProcessing}
-                  />
-                  <button className="os-fab-btn" onClick={handleParseActivity} disabled={isProcessing || !plannerInput.trim()}>
-                    {isProcessing ? <div className="spinner" /> : 'PROCESS'}
-                  </button>
+                  <textarea className="os-textarea-v2" value={plannerInput} onChange={e => setPlannerInput(e.target.value)} placeholder="Capture next move..." />
+                  <button className="os-fab-btn" onClick={handleParseActivity}>{isProcessing ? '...' : 'PROCESS'}</button>
                 </div>
               )}
             </div>
           </section>
 
-          {/* Schedule */}
-          <section className={`os-card glass-card col-span-2 ${expandingActivityId ? 'is-focused' : ''}`}>
+          <section className="os-card glass-card col-span-2">
             <h3>Execution Queue</h3>
             <div className="os-schedule-viewport custom-scroll">
-              {Object.entries(activitiesByDate).length === 0 ? (
-                <div className="os-empty-state">No scheduled intents detected.</div>
-              ) : (
-                Object.entries(activitiesByDate).map(([date, items]) => (
-                  <div key={date} className="os-date-segment">
-                    <div className="segment-label">{date === new Date().toISOString().split('T')[0] ? 'TODAY' : new Date(date).toLocaleDateString()}</div>
-                    <div className="segment-items">
-                      {items.map(a => {
-                        const isExpanded = expandingActivityId === a.id;
-                        const isCompleting = completingId === a.id;
-                        const statusColor = a.status === 'complete' ? '#10b981' : a.status === 'cancel' ? '#ef4444' : '#fff';
-
-                        return (
-                          <div key={a.id} className={`os-activity-row ${isExpanded ? 'is-expanded' : ''} ${isCompleting ? 'is-completing' : ''} status-${a.status}`}>
-                            <div className="row-indicator" style={{ background: DOMAIN_COLORS[a.domain] }} />
-                            <div className="row-main">
-                               <div className="row-header">
-                                  <span className="row-time">
-                                    {a.startTime} – {a.endTime}
-                                    {a.status === 'partial' && a.actualStartTime && (
-                                      <span className="row-actual-time"> 
-                                        (Actual: {a.actualStartTime} – {a.actualEndTime})
-                                      </span>
-                                    )}
-                                  </span>
-                                  <span className="row-domain" style={{ color: DOMAIN_COLORS[a.domain] }}>{a.domain}</span>
-                               </div>
-                               <span className="row-name">{a.name}</span>
-                            </div>
-                            <div className="row-action-area">
-                               {isExpanded ? (
-                                 <div className="row-menu animate-fade-in">
-                                    <button onClick={() => updateActivityStatus(a.id, 'complete')} className="menu-btn-done">DONE</button>
-                                    <button onClick={() => updateActivityStatus(a.id, 'partial')} className="menu-btn-partial">PARTIAL</button>
-                                    <button onClick={() => updateActivityStatus(a.id, 'cancel')} className="menu-btn-cancel">VOID</button>
-                                    <button onClick={() => deleteActivity(a.id)} className="menu-btn-del">DEL</button>
-                                    <button onClick={() => setExpandingActivityId(null)} className="menu-btn-close">×</button>
-                                 </div>
-                               ) : (
-                                 <button 
-                                    className={`row-status-pill status-${a.status}`} 
-                                    onClick={() => setExpandingActivityId(a.id)}
-                                    style={{ color: statusColor }}
-                                 >
-                                    {a.status === 'planned' ? (
-                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><circle cx="12" cy="12" r="10"/></svg>
-                                    ) : a.status === 'complete' ? (
-                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
-                                    ) : (
-                                      <span>{a.status.toUpperCase()}</span>
-                                    )}
-                                 </button>
-                               )}
-                            </div>
-                          </div>
-                        );
-                      })}
+              {Object.entries(activitiesByDate).map(([date, items]) => (
+                <div key={date} className="os-date-segment">
+                  <div className="segment-label">{date}</div>
+                  {items.map(a => (
+                    <div key={a.id} className="os-activity-row">
+                      <div className="row-indicator" style={{ background: DOMAIN_COLORS[a.domain] }} />
+                      <div className="row-main">
+                        <span className="row-time">{a.startTime}</span>
+                        <span className="row-name">{a.name}</span>
+                      </div>
+                      <button className="row-status-pill" onClick={() => updateActivityStatus(a.id, 'complete')}>
+                        {a.status === 'complete' ? '✓' : '○'}
+                      </button>
                     </div>
-                  </div>
-                ))
-              )}
+                  ))}
+                </div>
+              ))}
             </div>
           </section>
 
-          {/* Timeline */}
           <section className="os-card glass-card">
              <header className="os-card-header">
                 <h3>Temporal Map</h3>
@@ -748,162 +550,12 @@ function App() {
                   ))}
                 </div>
              </header>
-             <div className="os-heatmap-container">
-                {heatmapView === 'day' && (
-                  <div className="os-grid-day">
-                    {Array.from({ length: 24 }).map((_, h) => (
-                      <div key={h} className="os-hour-cell">
-                        <div className="cell-slots">
-                          {[0, 1, 2, 3].map(s => {
-                            const timeStr = `${h.toString().padStart(2, '0')}:${(s * 15).toString().padStart(2, '0')}`;
-                            const today = new Date().toISOString().split('T')[0];
-                            const act = activities.find(a => a.date === today && timeStr >= a.startTime && timeStr < a.endTime);
-                            return (
-                              <div 
-                                key={s} 
-                                className={`cell-dot ${act ? 'active' : ''}`} 
-                                style={act ? { background: DOMAIN_COLORS[act.domain] } : {}}
-                                onMouseMove={e => { setHoveredTask(act || null); setMousePos({ x: e.clientX, y: e.clientY }); }}
-                                onMouseLeave={() => setHoveredTask(null)}
-                              />
-                            );
-                          })}
-                        </div>
-                        <span className="cell-label">{h}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {heatmapView === 'week' && (
-                  <div className="os-heatmap-week-container custom-scroll-x">
-                    <div className="os-grid-week">
-                      {weekGridData.map((date, idx) => (
-                        <div key={date} className="os-week-col">
-                          <div className="os-week-slots">
-                            {Array.from({ length: 24 }).map((_, h) => {
-                               const timeStr = `${h.toString().padStart(2, '0')}:00`;
-                               const act = activities.find(a => a.date === date && timeStr >= a.startTime && timeStr < a.endTime);
-                               return (
-                                 <div 
-                                   key={h} 
-                                   className={`week-dot ${act ? 'active' : ''}`} 
-                                   style={act ? { background: DOMAIN_COLORS[act.domain] } : {}}
-                                   onMouseMove={e => { setHoveredTask(act || null); setMousePos({ x: e.clientX, y: e.clientY }); }}
-                                   onMouseLeave={() => setHoveredTask(null)}
-                                 />
-                               );
-                            })}
-                          </div>
-                          <span className="week-label">{['M', 'T', 'W', 'T', 'F', 'S', 'S'][idx]}</span>
-                        </div>
-                      ))}
-                    </div>
-                    {weekSummary && (
-                      <div className="os-view-summary animate-fade-in">
-                        <div className="summary-section">
-                           <label>Week Dominant</label>
-                           <div className="summary-val">
-                             <DomainIcon domain={weekSummary.dominant as Domain} />
-                             <span>{weekSummary.dominant}</span>
-                           </div>
-                        </div>
-                        <div className="summary-section">
-                           <label>Primary Intent</label>
-                           <div className="summary-tags">
-                             {weekSummary.topThree.length > 0 ? (
-                               weekSummary.topThree.map(t => <span key={t} className="summary-tag">{t}</span>)
-                             ) : (
-                               <span className="os-muted">None detected</span>
-                             )}
-                           </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {heatmapView === 'month' && (
-                  <div className="os-heatmap-month-container">
-                     <div className="os-grid-month">
-                        {['M','T','W','T','F','S','S'].map(d => <div key={d} className="month-day-head">{d}</div>)}
-                        {monthGridData.map((date, idx) => {
-                          if (!date) return <div key={`empty-${idx}`} className="os-month-cell empty" />;
-                          
-                          const dayActs = activities.filter(a => a.date === date);
-                          const dominant = dayActs.length > 0 
-                            ? (Object.entries(dayActs.reduce((acc, a) => ({...acc, [a.domain]: (acc[a.domain] || 0) + 1}), {} as any)) as [string, number][])
-                                .sort((a, b) => b[1] - a[1])[0][0] as Domain
-                            : null;
-
-                          return (
-                            <div key={date} className="os-month-cell">
-                               <span className="month-date-num">{new Date(date).getDate()}</span>
-                               {dominant && <div className="month-indicator-dot" style={{ backgroundColor: DOMAIN_COLORS[dominant] }} />}
-                            </div>
-                          );
-                        })}
-                     </div>
-                     {monthSummary && (
-                        <div className="os-view-summary animate-fade-in">
-                           <div className="summary-section">
-                              <label>Month Dominant</label>
-                              <div className="summary-val">
-                                <DomainIcon domain={monthSummary.dominant as Domain} />
-                                <span>{monthSummary.dominant}</span>
-                              </div>
-                           </div>
-                           <div className="summary-section">
-                              <label>Total Commits</label>
-                              <span className="summary-count-val">{monthSummary.total} intents</span>
-                           </div>
-                        </div>
-                     )}
-                  </div>
-                )}
+             <div className="os-heatmap-container custom-scroll">
+                {renderTemporalMap()}
              </div>
           </section>
         </div>
       </div>
-
-      {/* Overlays */}
-      {hoveredTask && (
-        <div className="os-instrument-tooltip" style={{ left: mousePos.x + 12, top: mousePos.y + 12 }}>
-          <div className="tt-header" style={{ borderLeft: `2px solid ${DOMAIN_COLORS[hoveredTask.domain]}` }}>
-            {hoveredTask.domain} • {hoveredTask.startTime}
-          </div>
-          <div className="tt-body">{hoveredTask.name}</div>
-        </div>
-      )}
-
-      {/* Partial Capture Modal */}
-      {partialTarget && (
-        <div className="os-overlay-blur" onClick={() => setPartialTarget(null)}>
-          <div className="os-partial-modal animate-slide-up" onClick={e => e.stopPropagation()}>
-            <header>
-               <div className="modal-indicator" style={{ background: DOMAIN_COLORS[partialTarget.domain] }} />
-               <h3>Capture Deviation</h3>
-            </header>
-            <div className="modal-body">
-               <p>Record actual time spent on <strong>{partialTarget.name}</strong></p>
-               <div className="temporal-input-row">
-                 <div className="os-input-field">
-                   <label>Actual Start</label>
-                   <input type="time" value={partialTimes.start} onChange={e => setPartialTimes({ ...partialTimes, start: e.target.value })} />
-                 </div>
-                 <div className="os-input-field">
-                   <label>Actual End</label>
-                   <input type="time" value={partialTimes.end} onChange={e => setPartialTimes({ ...partialTimes, end: e.target.value })} />
-                 </div>
-               </div>
-               <div className="modal-footer">
-                  <button className="btn-secondary" onClick={() => setPartialTarget(null)}>Discard</button>
-                  <button className="btn-primary-v2" onClick={handleSavePartial}>Log Execution</button>
-               </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <LifePeriodBadge activePeriod={activePeriod} onClick={() => setIsDrawerOpen(true)} />
 
@@ -913,36 +565,37 @@ function App() {
             <header><h2>Life Configuration</h2><button onClick={() => setIsDrawerOpen(false)}>&times;</button></header>
             <div className="os-drawer-scroll custom-scroll">
               <div className="os-input-field">
-                <label>Default Location (Geo-Context)</label>
-                <input 
-                  type="text" 
-                  value={userLocation} 
-                  onChange={e => setUserLocation(e.target.value)} 
-                  placeholder="e.g. London, UK"
-                />
+                <label>Context Location</label>
+                <input type="text" value={userLocation} onChange={e => setUserLocation(e.target.value)} placeholder="e.g. London, UK" />
               </div>
               <div className="os-input-field">
-                <label>Current Phase Objective</label>
-                <input 
-                  type="text" 
-                  value={activePeriod?.title || ''} 
-                  onChange={e => setLifePeriods((p: LifePeriod[]) => p.map(x => x.id === activePeriodId ? {...x, title: e.target.value} : x))} 
-                />
+                <label>Phase Objective</label>
+                <input type="text" value={activePeriod?.title || ''} onChange={e => setLifePeriods(p => p.map(x => x.id === activePeriodId ? {...x, title: e.target.value} : x))} />
               </div>
               <div className="os-input-field">
-                <label>Domain Bias (System Weights)</label>
-                {DOMAINS.map(d => (
-                  <div key={d} className="os-range-group">
-                    <div className="range-label"><span>{d}</span> <span>{activePeriod?.weights[d]}%</span></div>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="100" 
-                      value={activePeriod?.weights[d]} 
-                      onChange={e => updateWeight(d, parseInt(e.target.value))} 
-                    />
-                  </div>
-                ))}
+                <label>Domain Weights</label>
+                {DOMAINS.map(d => {
+                  const weight = activePeriod?.weights[d] || 0;
+                  return (
+                    <div 
+                      key={d} 
+                      className="os-range-group" 
+                      style={{ '--domain-color': DOMAIN_COLORS[d], '--range-val': `${weight}%` } as React.CSSProperties}
+                    >
+                      <div className="range-label">
+                        <span>{d}</span> 
+                        <span className="range-percent">{weight}%</span>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="100" 
+                        value={weight} 
+                        onChange={e => updateWeight(d, parseInt(e.target.value))} 
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -951,12 +604,6 @@ function App() {
     </div>
   );
 }
-
-const formatDateLabel = (dateStr: string) => {
-  const today = new Date().toISOString().split('T')[0];
-  if (dateStr === today) return "TODAY";
-  return new Date(dateStr).toLocaleDateString();
-};
 
 const rootElement = document.getElementById('root');
 if (rootElement) {
