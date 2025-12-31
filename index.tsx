@@ -9,16 +9,25 @@ import ReactDOM from 'react-dom/client';
 import { Activity, LifePeriod, Domain, ActivityStatus } from './types';
 import { DOMAINS, DEFAULT_WEIGHTS, DOMAIN_COLORS } from './constants';
 import { generateId } from './utils';
+import Login from './components/Login';
+import { auth, db } from './firebase';
+import { signOut } from 'firebase/auth';
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { User } from 'firebase/auth';
+import { SignalIcon, ThinkingIcon } from './components/Icons';
+// import { apiKey } from './config';
+
+
 
 // --- Shared Components ---
 
 const DomainIcon = ({ domain, size = 8 }: { domain: Domain, size?: number }) => (
-  <div style={{ 
-    width: size, 
-    height: size, 
-    borderRadius: '50%', 
-    backgroundColor: DOMAIN_COLORS[domain], 
-    boxShadow: `0 0 10px ${DOMAIN_COLORS[domain]}88` 
+  <div style={{
+    width: size,
+    height: size,
+    borderRadius: '50%',
+    backgroundColor: DOMAIN_COLORS[domain],
+    boxShadow: `0 0 10px ${DOMAIN_COLORS[domain]}88`
   }} />
 );
 
@@ -32,15 +41,15 @@ const LifePeriodBadge = ({ activePeriod, onClick }: { activePeriod: LifePeriod |
     <button className="life-period-badge" onClick={onClick}>
       <div className="badge-icon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
         </svg>
       </div>
       <div className="badge-content">
         <span className="badge-title">{activePeriod?.title || 'Active Phase'}</span>
         {dominantDomain && (
           <div className="badge-sub">
-             <DomainIcon domain={dominantDomain} size={6} />
-             <span>{dominantDomain} Bias</span>
+            <DomainIcon domain={dominantDomain} size={6} />
+            <span>{dominantDomain} Bias</span>
           </div>
         )}
       </div>
@@ -49,24 +58,20 @@ const LifePeriodBadge = ({ activePeriod, onClick }: { activePeriod: LifePeriod |
 };
 
 function App() {
+  const [user, setUser] = useState<User | null>(null);
+
+
   // --- Global State ---
-  const [lifePeriods, setLifePeriods] = useState<LifePeriod[]>(() => {
-    const saved = localStorage.getItem('life_periods');
-    return saved ? (JSON.parse(saved) as LifePeriod[]) : [{
-      id: 'initial',
-      title: 'Rest & Recover',
-      startDate: new Date().toISOString().split('T')[0],
-      endDate: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0],
-      weights: { ...DEFAULT_WEIGHTS, Sleep: 40, Health: 30 }
-    }];
-  });
+  const [lifePeriods, setLifePeriods] = useState<LifePeriod[]>([{
+    id: 'initial',
+    title: 'Rest & Recover',
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0],
+    weights: { ...DEFAULT_WEIGHTS, Sleep: 40, Health: 30 }
+  }]);
 
-  const [activities, setActivities] = useState<Activity[]>(() => {
-    const saved = localStorage.getItem('activities');
-    return saved ? (JSON.parse(saved) as Activity[]) : [];
-  });
-
-  const [userLocation, setUserLocation] = useState(() => localStorage.getItem('os_user_location') || '');
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [userLocation, setUserLocation] = useState('');
   const lastFetchedLocation = useRef<string>('');
 
   // --- UI State ---
@@ -75,41 +80,102 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [heatmapView, setHeatmapView] = useState<'day' | 'week' | 'month'>('day');
   const [plannerInput, setPlannerInput] = useState('');
-  const [isPlannerFocused, setIsPlannerFocused] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [previewActivity, setPreviewActivity] = useState<Activity | null>(null);
-  const [expandingActivityId, setExpandingActivityId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  
+  // Add this around line 82 in index.tsx
+  const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
+  // Add this line around line 84
+  const [isIntelligenceLoading, setIsIntelligenceLoading] = useState(true);
+
+
   // --- Sidebar Specific State ---
-  const [todos, setTodos] = useState<{id: string, text: string, done: boolean}[]>(() => {
-    const saved = localStorage.getItem('sidebar_todos');
-    return saved ? (JSON.parse(saved) as {id: string, text: string, done: boolean}[]) : [];
-  });
-  const [scratchpad, setScratchpad] = useState(() => localStorage.getItem('sidebar_scratch') || '');
+  const [todos, setTodos] = useState<{ id: string, text: string, done: boolean }[]>([]);
+  const [scratchpad, setScratchpad] = useState('');
   const [todoInput, setTodoInput] = useState('');
-  
+
+  // Add these lines around line 87 in index.tsx
+  const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
+  // Add this line around line 97 in index.tsx
+  const isInitialCollapseSet = useRef(false);
+
+
+  const getLocalYYYYMMDD = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+
+  const toggleDateCollapse = (date: string) => {
+    setCollapsedDates(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(date)) {
+        newSet.delete(date);
+      } else {
+        newSet.add(date);
+      }
+      return newSet;
+    });
+  };
+
+
   const [intelligence, setIntelligence] = useState<{
-    news: string;
+    news: {
+      today: { headline: string; category: string; date: string; }[];
+      weeklyWorld: { headline: string; category: string; date: string; }[];
+      weeklyIndia: { headline: string; category: string; date: string; }[];
+    };
     weather: string;
     newsSources: { uri: string; title: string }[];
   }>({
-    news: 'Decrypting headlines...',
-    weather: 'Location unset',
+    news: { today: [], weeklyWorld: [], weeklyIndia: [] },
+    weather: 'Fetching Weather',
     newsSources: [],
   });
 
-  // --- Persistent Storage Sync ---
-  useEffect(() => {
-    localStorage.setItem('life_periods', JSON.stringify(lifePeriods));
-    localStorage.setItem('activities', JSON.stringify(activities));
-  }, [lifePeriods, activities]);
 
   useEffect(() => {
-    localStorage.setItem('sidebar_todos', JSON.stringify(todos));
-    localStorage.setItem('sidebar_scratch', scratchpad);
-    localStorage.setItem('os_user_location', userLocation);
-  }, [todos, scratchpad, userLocation]);
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // --- Data Persistence ---
+
+  // Load user data from Firestore
+  useEffect(() => {
+    const loadData = async () => {
+      if (!user) return;
+      const docRef = doc(db, 'users', user.uid);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        const userData = docSnap.data();
+        setLifePeriods(userData.lifePeriods || lifePeriods);
+        setActivities(userData.activities || []);
+        setTodos(userData.todos || []);
+        setScratchpad(userData.scratchpad || '');
+        setUserLocation(userData.userLocation || '');
+      } else {
+        console.log("No user data document found, starting fresh.");
+      }
+    };
+    loadData();
+  }, [user]);
+
+  // Save scratchpad with a debounce
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (user && scratchpad !== '') {
+        const docRef = doc(db, 'users', user.uid);
+        setDoc(docRef, { scratchpad: scratchpad }, { merge: true });
+      }
+    }, 1500);
+    return () => clearTimeout(handler);
+  }, [scratchpad, user]);
 
   // --- Toast Timer ---
   useEffect(() => {
@@ -124,7 +190,10 @@ function App() {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(async (pos) => {
       const { latitude, longitude } = pos.coords;
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      // const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
+
+
       try {
         const resp = await ai.models.generateContent({
           model: 'gemini-3-flash-preview',
@@ -142,24 +211,44 @@ function App() {
   };
 
   // --- Intelligence Fetching ---
+  // Replace the entire fetchIntelligence function with this one
+  // Replace the entire fetchIntelligence function with this new version:
+
   const fetchIntelligence = async (forceWeather: boolean = false) => {
+    setIsIntelligenceLoading(true); // Start loading
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      // const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
+
+
       const now = new Date();
       const todayFull = now.toDateString();
       const currentYear = now.getFullYear();
-      
+
+      // 1. Fetch News
       const newsResp = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `CONTEXT: Today is ${todayFull}, year ${currentYear}. Latest news for tech and world.`,
+        contents: `
+        CONTEXT: Today is ${todayFull}, year ${currentYear}.
+        TASK: Provide a JSON object with three keys: "today", "weeklyWorld", and "weeklyIndia".
+        - "today": array of 2-3 brief tech/world news items for today.
+        - "weeklyWorld": array of 3-4 brief important world news items for the week.
+        - "weeklyIndia": array of 3-4 brief important India news items for the week.
+        Each item must be a JSON object with "headline", "category", and "date" string properties.
+        CRITICAL: Respond with ONLY the raw JSON object.
+      `,
         config: { tools: [{ googleSearch: {} }] }
       });
 
-      const newsChunks = newsResp.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-      const newsSources = newsChunks
-        .filter(c => c.web)
-        .map(c => ({ uri: c.web?.uri || '', title: c.web?.title || 'Source' }));
+      let parsedNews = { today: [], weeklyWorld: [], weeklyIndia: [] };
+      try {
+        const rawJson = newsResp.text.replace(/```json\n?/g, '').replace(/```/g, '');
+        parsedNews = JSON.parse(rawJson);
+      } catch (e) {
+        console.error("Failed to parse news JSON:", e);
+      }
 
+      // 2. Fetch Weather
       let weatherText = intelligence.weather;
       if (userLocation && (forceWeather || userLocation !== lastFetchedLocation.current)) {
         const weatherResp = await ai.models.generateContent({
@@ -168,39 +257,52 @@ function App() {
           config: { tools: [{ googleSearch: {} }] }
         });
         weatherText = weatherResp.text?.trim() || 'Unknown';
-        lastFetchedLocation.current = userLocation;
+        lastFetchedLocation.current = userLocation; // IMPORTANT: Remember the location we fetched for
       }
 
+      // 3. Set Final State
       setIntelligence({
-        news: newsResp.text || 'Unable to load news.',
+        news: parsedNews,
         weather: weatherText,
-        newsSources,
+        newsSources: [],
       });
-      setToast('Intelligence Sync Complete');
-    } catch (e) {
-      console.error(e);
-      setIntelligence(prev => ({ ...prev, news: 'Feed synchronization failed.' }));
-      setToast('Sync Failed');
+
+    } catch (error) {
+      console.error("Error fetching intelligence data:", error);
+      setIntelligence(prev => ({ ...prev, weather: 'Error' }));
+    } finally {
+      setIsIntelligenceLoading(false); // Stop loading
     }
   };
 
+
+
+  // REPLACE the two useEffects from line 257-270 with these:
+
   useEffect(() => {
-    if (isSidebarOpen) {
+    // When the user is loaded, automatically try to detect their location.
+    // Also, run an initial fetch for news.
+    if (user) {
+      detectLocation();
       fetchIntelligence();
     }
-  }, [isSidebarOpen]);
+  }, [user]);
 
-  // Trigger weather refresh when userLocation changes via dialog
   useEffect(() => {
-    if (userLocation && userLocation !== lastFetchedLocation.current && isSidebarOpen) {
-      fetchIntelligence(true);
+    // This hook triggers ONLY when the user's location changes.
+    // It forces a refetch of intelligence data, which will now include the weather.
+    if (userLocation && userLocation !== lastFetchedLocation.current) {
+      fetchIntelligence(true); // `true` forces a weather update
     }
   }, [userLocation]);
 
+
+
   // --- Computed Views ---
-  const activePeriod = useMemo(() => 
+  const activePeriod = useMemo(() =>
     lifePeriods.find(p => p.id === activePeriodId) || null
-  , [lifePeriods, activePeriodId]);
+    , [lifePeriods, activePeriodId]);
+
 
   const integrityScore = useMemo(() => {
     if (activities.length === 0) return 0;
@@ -209,17 +311,63 @@ function App() {
     return Math.round(((completed + partial * 0.5) / activities.length) * 100);
   }, [activities]);
 
-  // Priority Insight logic
+  // Add this hook around line 292 in index.tsx
+  const statusGlowClass = useMemo(() => {
+    if (integrityScore < 50) return 'glow-red';
+    if (integrityScore <= 80) return 'glow-yellow';
+    return 'glow-green';
+  }, [integrityScore]);
+
+
   const priorityInsight = useMemo(() => {
     if (!activePeriod || activities.length === 0) return { status: 'neutral', message: 'Operational baseline active.' };
     const dominantDomain = (Object.entries(activePeriod.weights).reduce((a, b) => a[1] > b[1] ? a : b)[0]) as Domain;
     const relevantActivities = activities.filter(a => a.domain === dominantDomain);
     const alignment = relevantActivities.length > 0 ? Math.round((relevantActivities.filter(a => a.status === 'complete').length / relevantActivities.length) * 100) : 0;
-    
+
     if (alignment > 80) return { status: 'aligned', message: `High performance in ${dominantDomain}.` };
     if (alignment > 40) return { status: 'neutral', message: `Focus on ${dominantDomain} is moderate.` };
     return { status: 'divergent', message: `${dominantDomain} focus needs reinforcement.` };
   }, [activities, activePeriod]);
+
+  // Add this new useMemo hook around line 307
+  const weeklyInsight = useMemo(() => {
+    const today = new Date();
+    // Week starts on Sunday (day 0)
+    const dayOfWeek = today.getDay();
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - dayOfWeek);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const weeklyActivities = activities.filter(a => {
+      // Ensure activity date is on or after the start of the week
+      const activityDate = new Date(a.date);
+      activityDate.setHours(0, 0, 0, 0);
+      return activityDate >= startOfWeek;
+    });
+
+    if (weeklyActivities.length === 0) {
+      return { status: 'neutral', message: 'No activities tracked this week.' };
+    }
+
+    const completed = weeklyActivities.filter(a => a.status === 'complete').length;
+    const partial = weeklyActivities.filter(a => a.status === 'partial').length;
+
+    // We base the score on all activities that were not cancelled
+    const totalCommitted = weeklyActivities.filter(a => a.status !== 'cancel').length;
+
+    if (totalCommitted === 0) {
+      return { status: 'neutral', message: 'Ready for a new week.' };
+    }
+
+    const score = Math.round(((completed + partial * 0.5) / totalCommitted) * 100);
+
+    if (score > 85) return { status: 'aligned', message: `Excellent week! ${score}% task completion.` };
+    if (score > 65) return { status: 'aligned', message: `Strong week. ${score}% completion.` };
+    if (score > 40) return { status: 'neutral', message: `Steady progress. ${score}% completion.` };
+    return { status: 'divergent', message: `Momentum needed. ${score}% completion.` };
+  }, [activities]);
+
 
   const activitiesByDate = useMemo(() => {
     const groups: Record<string, Activity[]> = {};
@@ -230,26 +378,88 @@ function App() {
     return groups;
   }, [activities]);
 
+  // Add this useEffect block around line 305
+  useEffect(() => {
+    const allDates = Object.keys(activitiesByDate);
+    // Set the initial collapsed state once activities are loaded
+    if (allDates.length > 0 && !isInitialCollapseSet.current) {
+      // const today = new Date().toISOString().split('T')[0];
+      const today = getLocalYYYYMMDD(new Date());
+
+      const datesToCollapse = allDates.filter(date => date !== today);
+      setCollapsedDates(new Set(datesToCollapse));
+      isInitialCollapseSet.current = true;
+    }
+  }, [activitiesByDate]);
+
+
+  // --- Helper for activity overlap detection ---
+  const getActivityOverlap = (activity: Activity, slotStart: number, slotEnd: number): boolean => {
+    const sParts = activity.startTime.split(':');
+    const eParts = activity.endTime.split(':');
+    const sH = parseInt(sParts[0]);
+    const sM = parseInt(sParts[1]) || 0;
+    const eH = parseInt(eParts[0]);
+    const eM = parseInt(eParts[1]) || 0;
+
+    const startTotal = sH + (sM / 60);
+    const endTotal = eH + (eM / 60);
+
+    // Overlap condition: Activity starts before slot ends AND activity ends after slot starts
+    return startTotal < slotEnd && endTotal > slotStart;
+  };
+
   // --- Temporal Map Rendering Logic ---
+  // Replace the entire renderTemporalMap function with this one
+
   const renderTemporalMap = () => {
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
+    const todayStr = getLocalYYYYMMDD(now);
+
 
     if (heatmapView === 'day') {
-      const hourlyData = Array.from({ length: 24 }).map((_, hour) => {
-        const hourStr = hour.toString().padStart(2, '0');
-        return activities.filter(a => a.date === todayStr && a.startTime.startsWith(hourStr));
-      });
+      const hours = Array.from({ length: 24 }).map((_, h) => h);
 
       return (
-        <div className="os-grid-day">
-          {hourlyData.map((acts, h) => (
-            <div key={h} className="os-hour-cell">
+        <div className="os-grid-day-v2">
+          {hours.map((h) => (
+            <div key={h} className="os-hour-block">
               <span className="cell-label">{h}:00</span>
-              <div className="cell-indicators">
-                {acts.map(a => (
-                  <div key={a.id} className="cell-dot active" style={{ backgroundColor: DOMAIN_COLORS[a.domain] }} title={a.name} />
-                ))}
+              <div className="os-quarter-grid">
+                {[0, 15, 30, 45].map((m, idx) => {
+                  const slotStart = h + (m / 60);
+                  const slotEnd = slotStart + 0.25;
+                  const activeActivities = activities.filter(a => a.date === todayStr && getActivityOverlap(a, slotStart, slotEnd));
+
+                  const tooltipText = activeActivities.length > 0
+                    ? activeActivities.map(a => `${a.name} (${a.startTime}-${a.endTime})`).join('\\n')
+                    : `No planned intent for ${h}:${m.toString().padStart(2, '0')}`;
+
+                  // --- NEW: LOGIC FOR OVERLAP STYLING ---
+                  const segmentStyle: React.CSSProperties = {};
+                  const isOverlap = activeActivities.length > 1;
+
+                  if (activeActivities.length === 1) {
+                    const color = DOMAIN_COLORS[activeActivities[0].domain];
+                    segmentStyle.backgroundColor = color;
+                    // This is the crucial fix: Set the CSS variable for the glow effect.
+                    (segmentStyle as any)['--segment-color'] = color;
+                  } else if (isOverlap) {
+                    // Create a gradient for overlaps
+                    const colors = activeActivities.map(a => DOMAIN_COLORS[a.domain]).join(', ');
+                    segmentStyle.background = `linear-gradient(45deg, ${colors})`;
+                  }
+                  // --- END: NEW LOGIC ---
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`os-quarter-segment ${activeActivities.length > 0 ? 'is-active' : ''} ${isOverlap ? 'is-overlap' : ''}`}
+                      style={segmentStyle}
+                      title={tooltipText}
+                    />
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -257,6 +467,7 @@ function App() {
       );
     }
 
+    // (The 'week' and 'month' logic remains the same, but is included here for completeness)
     if (heatmapView === 'week') {
       const days = [];
       for (let i = 6; i >= 0; i--) {
@@ -292,8 +503,7 @@ function App() {
       const currentYear = now.getFullYear();
       const firstDay = new Date(currentYear, currentMonth, 1);
       const lastDay = new Date(currentYear, currentMonth + 1, 0);
-      
-      // Padding for calendar
+
       for (let i = 0; i < firstDay.getDay(); i++) dates.push(null);
       for (let i = 1; i <= lastDay.getDate(); i++) {
         dates.push(new Date(currentYear, currentMonth, i).toISOString().split('T')[0]);
@@ -301,14 +511,13 @@ function App() {
 
       return (
         <div className="os-grid-month">
-          {['S','M','T','W','T','F','S'].map(d => <div key={d} className="cell-label">{d}</div>)}
+          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={`${d}-${i}`} className="cell-label">{d}</div>)}
           {dates.map((date, idx) => {
             if (!date) return <div key={`empty-${idx}`} className="os-month-cell empty" />;
             const dayActs = activities.filter(a => a.date === date);
-            const intensity = Math.min(dayActs.length * 0.2, 1);
             const isToday = date === todayStr;
             return (
-              <div key={date} className={`os-month-cell ${isToday ? 'is-today' : ''}`} style={{ backgroundColor: dayActs.length > 0 ? `rgba(59, 130, 246, ${0.1 + intensity * 0.4})` : 'transparent' }}>
+              <div key={date} className={`os-month-cell ${isToday ? 'is-today' : ''}`} style={{ backgroundColor: dayActs.length > 0 ? `rgba(59, 130, 246, ${0.1 + Math.min(dayActs.length * 0.2, 1) * 0.4})` : 'transparent' }}>
                 <span className="month-day-num">{new Date(date).getDate()}</span>
                 {dayActs.length > 0 && <div className="month-dot" />}
               </div>
@@ -319,27 +528,32 @@ function App() {
     }
   };
 
+
   // --- Logic Handlers ---
   const handleParseActivity = async () => {
     if (!plannerInput.trim() || isProcessing) return;
     setIsProcessing(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      // const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
+
+
       const now = new Date();
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Intent: "${plannerInput}". Context: ${now.toDateString()}. Priorities: ${JSON.stringify(activePeriod?.weights)}`,
+        contents: `Intent: "${plannerInput}". Context Date: ${now.toDateString()}. User Time: ${now.toLocaleTimeString()}. Current Phase: "${activePeriod?.title}". Weights: ${JSON.stringify(activePeriod?.weights)}. 
+        CRITICAL: All times must be in 24-hour HH:mm format. If user says "1pm to 3pm", you must return "13:00" and "15:00".`,
         config: {
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
             properties: {
               name: { type: Type.STRING },
-              date: { type: Type.STRING },
-              start_time: { type: Type.STRING },
-              end_time: { type: Type.STRING },
+              date: { type: Type.STRING, description: 'YYYY-MM-DD' },
+              start_time: { type: Type.STRING, description: 'HH:mm (24-hour format)' },
+              end_time: { type: Type.STRING, description: 'HH:mm (24-hour format)' },
               domain: { type: Type.STRING, enum: DOMAINS },
-              intent: { type: Type.STRING }
+              intent: { type: Type.STRING, description: 'Reasoning for classification relative to goals.' }
             },
             required: ['name', 'date', 'start_time', 'end_time', 'domain', 'intent']
           }
@@ -365,33 +579,195 @@ function App() {
   };
 
   const confirmActivity = () => {
-    if (previewActivity) {
-      setActivities(prev => [...prev, previewActivity]);
+    if (previewActivity && user) {
+      const newActivities = [...activities, previewActivity];
+      setActivities(newActivities);
+      setDoc(doc(db, 'users', user.uid), { activities: newActivities }, { merge: true });
       setPreviewActivity(null);
       setPlannerInput('');
       setToast('Activity Committed');
     }
   };
 
-  const updateActivityStatus = (id: string, status: ActivityStatus) => {
-    setActivities(prev => prev.map(a => a.id === id ? { ...a, status } : a));
-    setExpandingActivityId(null);
+  // Replace the old update/delete functions with these new versions
+
+  // const updateActivityStatus = (id: string, newStatus: ActivityStatus) => {
+  //   let startTime: string | null = null;
+  //   let endTime: string | null = null;
+
+  //   if (newStatus === 'partial') {
+  //     startTime = prompt("Please enter the actual start time (HH:mm):");
+  //     // Only ask for the end time if the start time was provided
+  //     if (startTime) {
+  //       endTime = prompt("Please enter the actual end time (HH:mm):");
+  //     }
+
+  //     // If the user cancelled either prompt, exit without making a change
+  //     if (!startTime || !endTime) {
+  //       setExpandedActivityId(null); // Close the menu
+  //       return;
+  //     }
+  //   }
+
+  //   setActivities(prev =>
+  //     prev.map(act => {
+  //       if (act.id === id) {
+  //         // Create a new object that matches the Activity interface
+  //         const updatedActivity: Activity = { ...act, status: newStatus };
+  //         if (newStatus === 'partial' && startTime && endTime) {
+  //           updatedActivity.actualStartTime = startTime;
+  //           updatedActivity.actualEndTime = endTime;
+  //         }
+  //         return updatedActivity;
+  //       }
+  //       return act;
+  //     })
+  //   );
+
+  //   setExpandedActivityId(null); // Collapse the menu after action
+  // };
+
+  const updateActivityStatus = (id: string, newStatus: ActivityStatus) => {
+    console.log(`Attempting to update activity ${id} to status ${newStatus}`);
+    if (!user) {
+      console.error("Update failed: User not logged in.");
+      return;
+    }
+
+    let startTime: string | null = null;
+    let endTime: string | null = null;
+
+    if (newStatus === 'partial') {
+      startTime = prompt("Please enter the actual start time (HH:mm):");
+      if (startTime) {
+        endTime = prompt("Please enter the actual end time (HH:mm):");
+      }
+      if (!startTime || !endTime) {
+        console.log("Partial update cancelled by user.");
+        setExpandedActivityId(null);
+        return;
+      }
+    }
+
+    setActivities(prevActivities => {
+      console.log("Calculating new activities array...");
+      const newActivities = prevActivities.map(act => {
+        if (act.id === id) {
+          const updatedActivity: Activity = { ...act, status: newStatus };
+          if (newStatus === 'partial' && startTime && endTime) {
+            updatedActivity.actualStartTime = startTime;
+            updatedActivity.actualEndTime = endTime;
+          }
+          console.log("Found and updated activity:", updatedActivity);
+          return updatedActivity;
+        }
+        return act;
+      });
+
+      // Save the newly calculated array directly to Firestore
+      console.log("Saving new activities array to Firestore...");
+      const docRef = doc(db, 'users', user.uid);
+      setDoc(docRef, { activities: newActivities }, { merge: true })
+        .then(() => {
+          console.log("Firestore update successful!");
+        })
+        .catch((error) => {
+          console.error("Firestore update failed:", error);
+        });
+
+      return newActivities;
+    });
+
+    setExpandedActivityId(null);
   };
 
+
+
+  const deleteActivity = (id: string) => {
+    console.log(`Attempting to delete activity ${id}`);
+    if (!user) {
+      console.error("Delete failed: User not logged in.");
+      return;
+    }
+
+    if (window.confirm('Are you sure you want to delete this activity?')) {
+      setActivities(prevActivities => {
+        console.log("Filtering out deleted activity...");
+        const newActivities = prevActivities.filter(act => act.id !== id);
+
+        // Save the newly filtered array directly to Firestore
+        console.log("Saving updated activities array to Firestore after deletion...");
+        const docRef = doc(db, 'users', user.uid);
+        setDoc(docRef, { activities: newActivities }, { merge: true })
+          .then(() => {
+            console.log("Firestore deletion successful!");
+          })
+          .catch((error) => {
+            console.error("Firestore deletion failed:", error);
+          });
+
+        return newActivities;
+      });
+    } else {
+      console.log("Deletion cancelled by user.");
+    }
+    setExpandedActivityId(null);
+  };
+
+
   const updateWeight = (domain: Domain, val: number) => {
-    if (!activePeriod) return;
-    setLifePeriods((prev: LifePeriod[]) => prev.map(p => p.id === activePeriodId ? { ...p, weights: { ...p.weights, [domain]: val } } : p));
+    if (!activePeriod || !user) return;
+    const newPeriods = lifePeriods.map(p =>
+      p.id === activePeriodId
+        ? { ...p, weights: { ...p.weights, [domain]: val } }
+        : p
+    );
+    setLifePeriods(newPeriods);
+    setDoc(doc(db, 'users', user.uid), { lifePeriods: newPeriods }, { merge: true });
   };
 
   const addTodo = () => {
-    if (!todoInput.trim()) return;
-    setTodos([{ id: generateId(), text: todoInput, done: false }, ...todos]);
+    if (!todoInput.trim() || !user) return;
+    const newTodos = [{ id: generateId(), text: todoInput, done: false }, ...todos];
+    setTodos(newTodos);
+    setDoc(doc(db, 'users', user.uid), { todos: newTodos }, { merge: true });
     setTodoInput('');
   };
 
+  const toggleTodo = (id: string) => {
+    if (!user) return;
+    const newTodos = todos.map(t => t.id === id ? { ...t, done: !t.done } : t);
+    setTodos(newTodos);
+    setDoc(doc(db, 'users', user.uid), { todos: newTodos }, { merge: true });
+  }
+
+  const deleteTodo = (id: string) => {
+    if (!user) return;
+    const newTodos = todos.filter(t => t.id !== id);
+    setTodos(newTodos);
+    setDoc(doc(db, 'users', user.uid), { todos: newTodos }, { merge: true });
+  }
+
+  // Add this function inside the App component
+  const handleLogout = () => {
+    signOut(auth).then(() => {
+      // setUser(null) is handled by the onAuthStateChanged listener
+      setToast('Signed Out');
+    }).catch((error) => {
+      console.error('Sign Out Error', error);
+      setToast('Logout Failed');
+    });
+  };
+
+
+  if (!user) {
+    return <Login setUser={setUser} />;
+  }
+
+
   return (
     <div className={`os-container ${isSidebarOpen ? 'sidebar-active' : ''}`}>
-      
+
       <div className={`os-toast ${toast ? 'is-visible' : ''}`}>
         <div className="toast-content">{toast}</div>
       </div>
@@ -410,16 +786,15 @@ function App() {
         </button>
 
         <div className="zen-content">
-          {/* CLIMATE - Order 1 on Mobile */}
           <section className="zen-card glass-card zen-weather-small-box zen-area-climate">
             <header className="zen-header">
               <h3>CLIMATE</h3>
               <button className="zen-gps-btn-v2" onClick={detectLocation} title="Detect Location">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                    <circle cx="12" cy="10" r="3" />
-                  </svg>
-               </button>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                  <circle cx="12" cy="10" r="3" />
+                </svg>
+              </button>
             </header>
             <div className="zen-weather-box-inner">
               <div className="weather-primary">
@@ -429,20 +804,80 @@ function App() {
             </div>
           </section>
 
-          {/* SIGNALS - Order 2 on Mobile */}
+          {/* // Replace the JSX for your "SIGNALS" zen-card with this: */}
+          {/* // Replace the entire SIGNALS section with this: */}
           <section className="zen-card glass-card zen-area-signals">
-            <header className="zen-header">
+            <header className="zen-header os-card-header-flex">
               <h3>SIGNALS</h3>
-              <button className="zen-minimal-refresh" onClick={() => fetchIntelligence(true)}>SYNC</button>
+              <div className={`sync-status ${isIntelligenceLoading ? 'is-syncing' : ''}`}>
+                {isIntelligenceLoading ? (
+                  <>
+                    <ThinkingIcon />
+                    <span>Syncing...</span>
+                  </>
+                ) : (
+                  <span>Synced</span>
+                )}
+              </div>
             </header>
-            <div className="zen-intelligence custom-scroll">
-              <div className="zen-news-feed">
-                 {intelligence.news.split('\n').map((line, i) => <div key={i} className="news-line">{line}</div>)}
+            <div className="card-content">
+              {/* The rest of your news content remains the same */}
+              <div className="news-section">
+                {intelligence.news && Object.keys(intelligence.news).length > 0 ? (
+                  <>
+                    {intelligence.news.today?.length > 0 && (
+                      <div className="news-category-section">
+                        <h3 className="news-section-header">Today</h3>
+                        {intelligence.news.today.map((item, index) => (
+                          <div key={`today-${index}`} className="news-item">
+                            <div className="news-item-meta">
+                              <span className="news-item-date">{item.date}</span>
+                              <span className="news-item-category">{item.category}</span>
+                            </div>
+                            <p className="news-item-headline">{item.headline}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {intelligence.news.weeklyWorld?.length > 0 && (
+                      <div className="news-category-section">
+                        <h3 className="news-section-header">Weekly World</h3>
+                        {intelligence.news.weeklyWorld.map((item, index) => (
+                          <div key={`world-${index}`} className="news-item">
+                            <div className="news-item-meta">
+                              <span className="news-item-date">{item.date}</span>
+                              <span className="news-item-category">{item.category}</span>
+                            </div>
+                            <p className="news-item-headline">{item.headline}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {intelligence.news.weeklyIndia?.length > 0 && (
+                      <div className="news-category-section">
+                        <h3 className="news-section-header">Weekly India</h3>
+                        {intelligence.news.weeklyIndia.map((item, index) => (
+                          <div key={`india-${index}`} className="news-item">
+                            <div className="news-item-meta">
+                              <span className="news-item-date">{item.date}</span>
+                              <span className="news-item-category">{item.category}</span>
+                            </div>
+                            <p className="news-item-headline">{item.headline}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p>Loading news...</p>
+                )}
               </div>
             </div>
           </section>
 
-          {/* FOCUS FLOW - Order 3 on Mobile */}
+
+
+
           <section className="zen-card glass-card zen-area-focus">
             <header className="zen-header"><h3>FOCUS FLOW</h3></header>
             <div className="zen-todo-input-group">
@@ -451,29 +886,39 @@ function App() {
             </div>
             <div className="zen-todo-list custom-scroll">
               {todos.map(t => (
-                <div key={t.id} className={`zen-todo-item ${t.done ? 'is-done' : ''}`} onClick={() => setTodos(todos.map(x => x.id === t.id ? {...x, done: !x.done} : x))}>
+                <div key={t.id} className={`zen-todo-item ${t.done ? 'is-done' : ''}`} onClick={() => toggleTodo(t.id)}>
                   <div className="zen-check" />
                   <span>{t.text}</span>
-                  <button className="zen-trash" onClick={e => { e.stopPropagation(); setTodos(todos.filter(x => x.id !== t.id)); }}>×</button>
+                  <button className="zen-trash" onClick={e => { e.stopPropagation(); deleteTodo(t.id); }}>×</button>
                 </div>
               ))}
             </div>
           </section>
 
-          {/* SCRATCHPAD - Order 4 on Mobile */}
           <section className="zen-card glass-card fill-height zen-area-scratch">
             <header className="zen-header"><h3>SCRATCHPAD</h3></header>
-            <textarea 
-              className="zen-scratchpad-instrument custom-scroll" 
-              value={scratchpad} 
-              onChange={e => setScratchpad(e.target.value)} 
-              placeholder="Unstructured thoughts..." 
+            <textarea
+              className="zen-scratchpad-instrument custom-scroll"
+              value={scratchpad}
+              onChange={e => setScratchpad(e.target.value)}
+              placeholder="Unstructured thoughts..."
             />
           </section>
+
+
+        </div>
+        {/* This goes at the end of the "zen-content" div */}
+        <div className="zen-user-profile">
+          <img src={user?.photoURL || ''} alt="User Avatar" />
+          <div className="user-info">
+            <div className="user-name">{user?.displayName || 'Anonymous User'}</div>
+            <button className="logout-btn" onClick={handleLogout}>LOG OUT</button>
+          </div>
         </div>
       </div>
 
       <div className="os-main">
+        {/* Replace the os-banner-row with this new version */}
         <div className="os-banner-row">
           <header className={`os-status-banner ${integrityScore > 70 ? 'is-aligned' : 'is-neutral'}`}>
             <div className="banner-text">
@@ -487,10 +932,17 @@ function App() {
               <p>{priorityInsight.message}</p>
             </div>
           </header>
+          <header className={`os-status-banner os-insight-banner is-${weeklyInsight.status}`}>
+            <div className="banner-text">
+              <h2>Weekly Insight</h2>
+              <p>{weeklyInsight.message}</p>
+            </div>
+          </header>
         </div>
 
+
         <div className="os-dashboard-grid">
-          <section className="os-card glass-card">
+          <section className={`os-card glass-card ${statusGlowClass}`}>
             <h3>Status</h3>
             <div className="os-metric-box">
               <span className="metric-val-large">{integrityScore}<small>%</small></span>
@@ -502,11 +954,24 @@ function App() {
             <h3>Intent Planner</h3>
             <div className="os-planner-area">
               {previewActivity ? (
-                <div className="os-ai-preview-card">
-                  <h4>{previewActivity.name}</h4>
+                <div className="os-ai-preview-card" style={{ '--preview-glow': DOMAIN_COLORS[previewActivity.domain] } as any}>
+                  <div className="preview-badge" style={{ backgroundColor: DOMAIN_COLORS[previewActivity.domain] }}>
+                    {previewActivity.domain}
+                  </div>
+                  <div className="preview-main">
+                    <h4>{previewActivity.name}</h4>
+                    <p className="preview-time">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                      {previewActivity.date} • {previewActivity.startTime} - {previewActivity.endTime}
+                    </p>
+                    <div className="preview-intent-box">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+                      <p>{previewActivity.intent}</p>
+                    </div>
+                  </div>
                   <div className="os-preview-actions">
-                    <button className="btn-secondary" onClick={() => setPreviewActivity(null)}>Discard</button>
-                    <button className="btn-primary-v2" onClick={confirmActivity}>Commit</button>
+                    <button className="btn-discard" onClick={() => setPreviewActivity(null)}>DISCARD</button>
+                    <button className="btn-commit" onClick={confirmActivity}>COMMIT INTENT</button>
                   </div>
                 </div>
               ) : (
@@ -518,41 +983,97 @@ function App() {
             </div>
           </section>
 
+          {/* Replace the entire "Execution Queue" section with this new code */}
           <section className="os-card glass-card col-span-2">
-            <h3>Execution Queue</h3>
+            <header className="os-card-header-flex">
+              <h3>Execution Queue</h3>
+              <button
+                className="os-collapse-all-btn"
+                onClick={() => {
+                  // If all are already collapsed, expand all. Otherwise, collapse all.
+                  const allDates = Object.keys(activitiesByDate);
+                  if (collapsedDates.size === allDates.length) {
+                    setCollapsedDates(new Set());
+                  } else {
+                    setCollapsedDates(new Set(allDates));
+                  }
+                }}
+              >
+                Toggle All
+              </button>
+            </header>
             <div className="os-schedule-viewport custom-scroll">
-              {Object.entries(activitiesByDate).map(([date, items]) => (
-                <div key={date} className="os-date-segment">
-                  <div className="segment-label">{date}</div>
-                  {items.map(a => (
-                    <div key={a.id} className="os-activity-row">
-                      <div className="row-indicator" style={{ background: DOMAIN_COLORS[a.domain] }} />
-                      <div className="row-main">
-                        <span className="row-time">{a.startTime}</span>
-                        <span className="row-name">{a.name}</span>
-                      </div>
-                      <button className="row-status-pill" onClick={() => updateActivityStatus(a.id, 'complete')}>
-                        {a.status === 'complete' ? '✓' : '○'}
-                      </button>
+              {Object.keys(activitiesByDate).sort((a, b) => b.localeCompare(a)).map(date => {
+                const isCollapsed = collapsedDates.has(date);
+                const items = activitiesByDate[date];
+                const today = getLocalYYYYMMDD(new Date());
+
+                let dateLabel = date;
+                if (date === today) {
+                  dateLabel = 'Today';
+                } else if (date < today) {
+                  dateLabel = `${date} (Past)`;
+                }
+
+                return (
+                  <div key={date} className={`os-date-segment ${isCollapsed ? 'is-collapsed' : ''}`}>
+                    <div className="segment-label" onClick={() => toggleDateCollapse(date)}>
+                      <span>{dateLabel}</span>
+                      <svg className="segment-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m6 9 6 6 6-6" /></svg>
                     </div>
-                  ))}
-                </div>
-              ))}
+                    <div className="segment-content">
+                      {items.map(a => (
+                        <div key={a.id} className="os-activity-row">
+                          <div className="row-indicator" style={{ background: DOMAIN_COLORS[a.domain as keyof typeof DOMAIN_COLORS] }} />
+                          <div className="row-main">
+                            <span className="row-time">
+                              {a.status === 'partial' && a.actualStartTime && a.actualEndTime ? `(Done ${a.actualStartTime}-${a.actualEndTime}) ` : ''}
+                              {a.startTime} - {a.endTime}
+                            </span>
+                            <span className="row-name">{a.name}</span>
+                          </div>
+                          <div className="activity-status-container">
+                            {expandedActivityId === a.id ? (
+                              <div className="activity-actions-menu">
+                                <button onClick={() => updateActivityStatus(a.id, 'complete')} title="Complete">✓</button>
+                                <button onClick={() => updateActivityStatus(a.id, 'partial')} title="Partial">◐</button>
+                                <button onClick={() => updateActivityStatus(a.id, 'cancel')} title="Cancel">✗</button>
+                                <button onClick={() => deleteActivity(a.id)} title="Delete">🗑️</button>
+                              </div>
+                            ) : (
+                              <button
+                                className={`row-status-pill status-${a.status}`}
+                                onClick={() => setExpandedActivityId(expandedActivityId === a.id ? null : a.id)}
+                              >
+                                {{
+                                  'complete': '✓', 'partial': 'PARTIAL', 'cancel': '✗',
+                                  'planned': '○', 'missed': '!'
+                                }[a.status]}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </section>
 
+
           <section className="os-card glass-card">
-             <header className="os-card-header">
-                <h3>Temporal Map</h3>
-                <div className="os-mini-tabs">
-                  {['day', 'week', 'month'].map(v => (
-                    <button key={v} className={heatmapView === v ? 'is-active' : ''} onClick={() => setHeatmapView(v as any)}>{v.charAt(0)}</button>
-                  ))}
-                </div>
-             </header>
-             <div className="os-heatmap-container custom-scroll">
-                {renderTemporalMap()}
-             </div>
+            <header className="os-card-header">
+              <h3>Temporal Map</h3>
+              <div className="os-mini-tabs">
+                {['day', 'week', 'month'].map(v => (
+                  <button key={v} className={heatmapView === v ? 'is-active' : ''} onClick={() => setHeatmapView(v as any)}>{v.charAt(0)}</button>
+                ))}
+              </div>
+            </header>
+            <div className="os-heatmap-container custom-scroll">
+              {renderTemporalMap()}
+            </div>
           </section>
         </div>
       </div>
@@ -570,28 +1091,28 @@ function App() {
               </div>
               <div className="os-input-field">
                 <label>Phase Objective</label>
-                <input type="text" value={activePeriod?.title || ''} onChange={e => setLifePeriods(p => p.map(x => x.id === activePeriodId ? {...x, title: e.target.value} : x))} />
+                <input type="text" value={activePeriod?.title || ''} onChange={e => setLifePeriods(p => p.map(x => x.id === activePeriodId ? { ...x, title: e.target.value } : x))} />
               </div>
               <div className="os-input-field">
                 <label>Domain Weights</label>
                 {DOMAINS.map(d => {
                   const weight = activePeriod?.weights[d] || 0;
                   return (
-                    <div 
-                      key={d} 
-                      className="os-range-group" 
+                    <div
+                      key={d}
+                      className="os-range-group"
                       style={{ '--domain-color': DOMAIN_COLORS[d], '--range-val': `${weight}%` } as React.CSSProperties}
                     >
                       <div className="range-label">
-                        <span>{d}</span> 
+                        <span>{d}</span>
                         <span className="range-percent">{weight}%</span>
                       </div>
-                      <input 
-                        type="range" 
-                        min="0" 
-                        max="100" 
-                        value={weight} 
-                        onChange={e => updateWeight(d, parseInt(e.target.value))} 
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={weight}
+                        onChange={e => updateWeight(d, parseInt(e.target.value))}
                       />
                     </div>
                   );
