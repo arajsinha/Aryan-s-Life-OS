@@ -18,10 +18,29 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+html,
 body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
+  background: #000;
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  background: #000;
+  font-family: 'Inter', -apple-system, sans-serif;
+  color: var(--text-main);
+
+}
+
+
+body {
+  margin: 0;
+  /* padding: 0; */
+  /* background: var(--bg); */
   color: var(--text-main);
   font-family: 'Inter', -apple-system, sans-serif;
   overflow-x: hidden;
@@ -2293,6 +2312,7 @@ body {
   padding-bottom: 20px;
   border-bottom: 1px solid var(--border);
 }
+
 .review-section:last-child {
   border-bottom: none;
   margin-bottom: 0;
@@ -2307,33 +2327,41 @@ body {
 }
 
 .review-stat {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 0;
-    font-size: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  font-size: 0.9rem;
 }
 
 .review-stat span {
-    color: var(--text-dim);
+  color: var(--text-dim);
 }
 
 .review-stat strong {
-    font-weight: 700;
-    text-align: right;
+  font-weight: 700;
+  text-align: right;
 }
 
-.review-stat .status-aligned { color: #27ae60; }
-.review-stat .status-divergent { color: #e74c3c; }
-.review-stat .status-neutral { color: var(--text-dim); }
+.review-stat .status-aligned {
+  color: #27ae60;
+}
+
+.review-stat .status-divergent {
+  color: #e74c3c;
+}
+
+.review-stat .status-neutral {
+  color: var(--text-dim);
+}
 
 .ai-thinking-box {
-    background: rgba(255, 255, 255, 0.03);
-    padding: 40px;
-    border-radius: 16px;
-    text-align: center;
-    font-style: italic;
-    color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 40px;
+  border-radius: 16px;
+  text-align: center;
+  font-style: italic;
+  color: var(--text-dim);
 }
 
 .ai-suggestions {
@@ -2408,4 +2436,249 @@ body {
   transform: none;
   box-shadow: none;
   filter: none;
+}
+
+
+/* --- New Goal Form UI --- */
+
+.goal-form-container {
+  padding: 16px;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
+.goals-section>header .add-goal-btn {
+  font-size: 20px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-dim);
+  transition: all 0.2s;
+}
+
+.goals-section>header .add-goal-btn:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  transform: rotate(90deg);
+}
+
+.goal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-input,
+.form-select,
+.form-textarea {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.form-textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.form-label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.btn-secondary,
+.btn-primary {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: white;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.2);
+}
+
+
+/* -- Metric-specific styles -- */
+.metric-section {
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-toggle label {
+  font-size: 0.9rem;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.form-toggle input {
+  width: 16px;
+  height: 16px;
+}
+
+.metric-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* -- Goal Item Display -- */
+.goal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 4px;
+}
+
+.goal-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-main);
+}
+
+.goal-status-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background-color: #333;
+  color: #ccc;
+  flex-shrink: 0;
+  margin-left: 8px;
+  text-align: center;
+  min-width: 80px;
+}
+
+.goal-status-badge.status-not_started {
+  background-color: #444;
+}
+
+.goal-status-badge.status-in_progress {
+  background-color: #2563eb;
+  color: white;
+}
+
+.goal-status-badge.status-at_risk {
+  background-color: #f59e0b;
+  color: #431407;
+}
+
+.goal-status-badge.status-blocked {
+  background-color: #ef4444;
+  color: white;
+}
+
+.goal-status-badge.status-completed {
+  background-color: #10b981;
+  color: white;
+}
+
+
+.goal-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.goal-metric {
+  font-size: 0.8rem;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.goal-metric .metric-name {
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.goal-metric .metric-value {
+  color: var(--text-main);
 }

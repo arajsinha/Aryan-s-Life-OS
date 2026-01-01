@@ -17,6 +17,7 @@ import { User } from 'firebase/auth';
 import { SignalIcon, ThinkingIcon } from './components/Icons';
 import GoalsPanel from './components/GoalsPanel';
 import DayReviewPanel from './components/DayReviewPanel';
+import { haptic } from "@/utils/haptics";
 
 // import { apiKey } from './config';
 
@@ -194,6 +195,11 @@ function App() {
     const timer = setInterval(() => setNow(new Date()), 60000); // Update time every minute
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    window.scrollTo(0, 1);
+  }, []);
+
 
   // Save scratchpad with a debounce
   useEffect(() => {
@@ -398,7 +404,7 @@ function App() {
   }, [activities]);
 
   const goalInsight = useMemo(() => {
-    const activeGoals = goals.filter(g => g.isActive);
+    const activeGoals = goals.filter(g => g.status === 'in_progress' || g.status === 'at_risk');
     if (activeGoals.length === 0) {
       return { status: 'neutral', message: 'No active goals defined.' };
     }
@@ -446,19 +452,20 @@ function App() {
         const startTimeStr = freeSlotStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
         return {
           status: 'divergent',
-          message: `Free near ${startTimeStr}. Time for: "${mostRecentNeglected.title}"?`
+          message: `Free near ${startTimeStr}. Time for: \"${mostRecentNeglected.title}\"?`
         };
       }
 
       return {
         status: 'divergent',
-        message: `Focus needed on: "${mostRecentNeglected.title}"`
+        message: `Focus needed on: \"${mostRecentNeglected.title}\"`
       };
     }
 
     return { status: 'aligned', message: 'All goals have tracked activity.' };
 
   }, [now, activities, goals, getLocalYYYYMMDD]);
+
 
 
   const currentTaskInsight = useMemo(() => {
@@ -530,10 +537,15 @@ function App() {
       Based on my performance today and my overall goals, create a schedule for tomorrow.
 
       My Overall Goal Domains (higher weight means more important):
-      ${JSON.stringify(domainWeights, null, 2)}
+      ${JSON.stringify(activePeriod?.weights, null, 2)}
 
       My Active Goals:
-      ${goals.filter(g => g.isActive).map(g => `- ${g.title} (Type: ${g.type})`).join('\n')}
+      ${goals.filter(g => g.status === 'in_progress' || g.status === 'at_risk').map(g => {
+      const metricString = g.metric
+        ? `(Progress: ${g.metric.current}${g.metric.unit} -> Target: ${g.metric.target}${g.metric.unit})`
+        : '';
+      return `- ${g.title} [${g.category}] ${metricString}`;
+    }).join('\\n') || 'None'}
       
       Today's (${todayStr}) Performance Summary:
       - Integrity Score: ${integrityScore}%
@@ -543,17 +555,18 @@ function App() {
       - Activities Missed: ${todaysActivities.filter(a => a.status === 'missed' || a.status === 'partial').length}
 
       Tomorrow's (${tomorrowStr}) Existing Commitments (do not schedule over these):
-      ${tomorrowsExistingActivities.map(a => `- ${a.name} from ${a.startTime} to ${a.endTime}`).join('\n') || 'None'}
+      ${tomorrowsExistingActivities.map(a => `- ${a.name} from ${a.startTime} to ${a.endTime}`).join('\\n') || 'None'}
 
       INSTRUCTIONS:
       1. Analyze my performance, especially the goal and priority insights.
-      2. Identify which goals I neglected or need to focus on.
-      3. Create a list of 2-4 suggested activities for tomorrow that will help me get back on track with my goals.
+      2. Identify which goals I neglected or which metrics are lagging.
+      3. Create a list of 2-4 suggested activities for tomorrow that will help me get back on track with my goals. Pay special attention to the metrics. For example, if a weight loss goal is lagging, suggest a 'Workout' activity.
       4. Place these activities in logical, empty time slots, avoiding my existing commitments.
       5. VERY IMPORTANT: Respond ONLY with a valid JSON array of "Activity" objects. Do not include any other text, explanation, or markdown. The structure for each activity must be: { "id": "uuid", "name": "...", "date": "${tomorrowStr}", "startTime": "HH:MM", "endTime": "HH:MM", "domain": "...", "status": "planned", "goalId": "null | string" }
     `;
 
     try {
+      // Assuming generateIntent is a function that calls the AI model
       const result = await generateIntent(prompt, "planner");
       const suggested = JSON.parse(result.response) as Activity[];
 
@@ -568,6 +581,7 @@ function App() {
       setIsGeneratingSuggestions(false);
     }
   };
+
 
   const handleCommitToTomorrow = (suggestedActivities: Activity[]) => {
     setActivities(prev => [...prev, ...suggestedActivities]);
@@ -937,20 +951,35 @@ function App() {
     setExpandedActivityId(null);
   };
 
-  const addGoal = async (goal: Omit<Goal, 'id' | 'createdAt' | 'updatedAt' | 'isActive'>) => {
+  // const addGoal = async (goal: Omit<Goal, 'id' | 'createdAt' | 'updatedAt' | 'isActive'>) => {
+  //   if (!user) return;
+  //   const newGoal: Goal = {
+  //     ...goal,
+  //     id: generateId(),
+  //     createdAt: new Date().toISOString(),
+  //     updatedAt: new Date().toISOString(),
+  //     isActive: true,
+  //   };
+  //   const goalDocRef = doc(db, 'users', user.uid, 'goals', newGoal.id);
+  //   await setDoc(goalDocRef, newGoal);
+  //   setGoals(prev => [...prev, newGoal]);
+  //   setToast('Goal Added');
+  // };
+
+  const addGoal = async (goal: Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>) => {
     if (!user) return;
     const newGoal: Goal = {
       ...goal,
       id: generateId(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      isActive: true,
     };
     const goalDocRef = doc(db, 'users', user.uid, 'goals', newGoal.id);
     await setDoc(goalDocRef, newGoal);
     setGoals(prev => [...prev, newGoal]);
     setToast('Goal Added');
   };
+
 
   const updateGoal = async (goalToUpdate: Goal) => {
     if (!user) return;
@@ -1255,7 +1284,7 @@ function App() {
                         onChange={(e) => setSelectedGoalId(e.target.value || null)}
                       >
                         <option value="">No Goal</option>
-                        {goals.filter(g => g.isActive).map(g => (
+                        {goals.filter(g => g.status !== 'completed').map(g => (
                           <option key={g.id} value={g.id}>
                             [{g.type === 'short_term' ? 'S' : 'L'}] {g.title}
                           </option>
@@ -1456,3 +1485,9 @@ if (rootElement) {
   const root = ReactDOM.createRoot(rootElement);
   root.render(<App />);
 }
+
+import { registerSW } from "virtual:pwa-register";
+
+registerSW({
+  immediate: true
+});

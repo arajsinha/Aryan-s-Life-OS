@@ -18,17 +18,29 @@ export type ActivityStatus = 'planned' | 'complete' | 'partial' | 'cancel' | 'mi
 // --- NEW: Goal System Types ---
 export type GoalType = 'short_term' | 'long_term';
 export type GoalCategory = 'Health' | 'Career' | 'Project' | 'Finance' | 'Leisure' | 'Relationships' | 'Other';
+export type GoalStatus = 'not_started' | 'in_progress' | 'at_risk' | 'blocked' | 'completed';
+
+export interface GoalMetric {
+  name: string;      // e.g., 'Weight', 'Savings', 'Pages Read'
+  unit: string;      // e.g., 'kg', 'USD', 'pages'
+  current: number;
+  target: number;
+}
 
 export interface Goal {
   id: string;
   type: GoalType;
   title: string;
   category: GoalCategory;
-  description?: string;
+  description?: string; // The "qualitative why"
+  status: GoalStatus;
+  
+  // Optional metric for quantifiable goals
+  metric?: GoalMetric;
+
   targetDate?: string; // YYYY-MM-DD
   createdAt: string;   // ISO String
   updatedAt: string;   // ISO String
-  isActive: boolean;
 }
 // --- END: Goal System Types ---
 
@@ -47,7 +59,7 @@ export interface Activity {
   // --- NEW: Link to Goals ---
   goalId?: string;
   goalType?: GoalType;
-  // --- END: Link to Goals ---
+  // --- END: Link to Goals --
 }
 
 export interface LifePeriod {
