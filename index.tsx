@@ -6,15 +6,18 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
-import { Activity, LifePeriod, Domain, ActivityStatus } from './types';
+import { Activity, LifePeriod, Domain, ActivityStatus, Goal } from './types';
 import { DOMAINS, DEFAULT_WEIGHTS, DOMAIN_COLORS } from './constants';
 import { generateId } from './utils';
 import Login from './components/Login';
 import { auth, db } from './firebase';
 import { signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs, deleteDoc } from "firebase/firestore";
 import { User } from 'firebase/auth';
 import { SignalIcon, ThinkingIcon } from './components/Icons';
+import GoalsPanel from './components/GoalsPanel';
+import DayReviewPanel from './components/DayReviewPanel';
+
 // import { apiKey } from './config';
 
 
@@ -71,15 +74,18 @@ function App() {
   }]);
 
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [goals, setGoals] = useState<Goal[]>([]);
   const [userLocation, setUserLocation] = useState('');
   const lastFetchedLocation = useRef<string>('');
 
   // --- UI State ---
   const [activePeriodId] = useState<string>(lifePeriods[0]?.id || '');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isGoalsPanelOpen, setIsGoalsPanelOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [heatmapView, setHeatmapView] = useState<'day' | 'week' | 'month'>('day');
   const [plannerInput, setPlannerInput] = useState('');
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [previewActivity, setPreviewActivity] = useState<Activity | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -87,7 +93,7 @@ function App() {
   const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
   // Add this line around line 84
   const [isIntelligenceLoading, setIsIntelligenceLoading] = useState(true);
-
+  const [now, setNow] = useState(new Date()); // ADD THIS
 
   // --- Sidebar Specific State ---
   const [todos, setTodos] = useState<{ id: string, text: string, done: boolean }[]>([]);
@@ -99,13 +105,24 @@ function App() {
   // Add this line around line 97 in index.tsx
   const isInitialCollapseSet = useRef(false);
 
+  const [isReviewPanelOpen, setIsReviewPanelOpen] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState<Activity[]>([]);
+  const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false);
 
-  const getLocalYYYYMMDD = (date: Date) => {
+  const getLocalYYYYMMDD = useCallback((date: Date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
-  }
+  }, []);
+
+  const showToast = (message: string) => {
+    setToast(message);
+    setTimeout(() => {
+      setToast(null);
+    }, 3000); // The toast will disappear after 3 seconds
+  };
+
 
 
   const toggleDateCollapse = (date: string) => {
@@ -152,6 +169,13 @@ function App() {
       const docRef = doc(db, 'users', user.uid);
       const docSnap = await getDoc(docRef);
 
+      // --- Load Goals Subcollection ---
+      const goalsColRef = collection(db, 'users', user.uid, 'goals');
+      const goalsSnapshot = await getDocs(goalsColRef);
+      const loadedGoals = goalsSnapshot.docs.map(doc => doc.data() as Goal);
+      setGoals(loadedGoals);
+      // --- End Goal Loading ---
+
       if (docSnap.exists()) {
         const userData = docSnap.data();
         setLifePeriods(userData.lifePeriods || lifePeriods);
@@ -165,6 +189,11 @@ function App() {
     };
     loadData();
   }, [user]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000); // Update time every minute
+    return () => clearInterval(timer);
+  }, []);
 
   // Save scratchpad with a debounce
   useEffect(() => {
@@ -368,6 +397,109 @@ function App() {
     return { status: 'divergent', message: `Momentum needed. ${score}% completion.` };
   }, [activities]);
 
+  const goalInsight = useMemo(() => {
+    const activeGoals = goals.filter(g => g.isActive);
+    if (activeGoals.length === 0) {
+      return { status: 'neutral', message: 'No active goals defined.' };
+    }
+
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay());
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const weeklyActivities = activities.filter(a => new Date(a.date) >= startOfWeek);
+
+    const neglectedGoals = activeGoals.filter(goal =>
+      !weeklyActivities.some(act => act.goalId === goal.id)
+    );
+
+    if (neglectedGoals.length > 0) {
+      const mostRecentNeglected = neglectedGoals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+      const todayStr = getLocalYYYYMMDD(now);
+
+      const todaysActivities = activities
+        .filter(a => a.date === todayStr)
+        .sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+      let freeSlotStart: Date | null = null;
+      let searchTime = new Date(now.getTime() + 5 * 60000); // Start looking 5 mins from now
+
+      for (let i = 0; i < 48; i++) { // Check next 12 hours
+        const slotToTest = new Date(searchTime.getTime() + i * 15 * 60000);
+        const slotEnd = new Date(slotToTest.getTime() + 30 * 60000);
+
+        if (slotToTest.getHours() > 22 || slotToTest.getHours() < 7) continue;
+
+        const isOverlapping = todaysActivities.some(act => {
+          const actStart = new Date(`${todayStr}T${act.startTime}`);
+          const actEnd = new Date(`${todayStr}T${act.endTime}`);
+          return slotToTest < actEnd && slotEnd > actStart;
+        });
+
+        if (!isOverlapping) {
+          freeSlotStart = slotToTest;
+          break;
+        }
+      }
+
+      if (freeSlotStart) {
+        const startTimeStr = freeSlotStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        return {
+          status: 'divergent',
+          message: `Free near ${startTimeStr}. Time for: "${mostRecentNeglected.title}"?`
+        };
+      }
+
+      return {
+        status: 'divergent',
+        message: `Focus needed on: "${mostRecentNeglected.title}"`
+      };
+    }
+
+    return { status: 'aligned', message: 'All goals have tracked activity.' };
+
+  }, [now, activities, goals, getLocalYYYYMMDD]);
+
+
+  const currentTaskInsight = useMemo(() => {
+    const todayStr = getLocalYYYYMMDD(now);
+    const todaysActivities = activities
+      .filter(a => a.date === todayStr)
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+    if (todaysActivities.length === 0) {
+      return { title: 'OPEN DAY', message: 'No tasks scheduled. Plan your next move.' };
+    }
+
+    for (const activity of todaysActivities) {
+      const startTime = new Date(`${activity.date}T${activity.startTime}`);
+      const endTime = new Date(`${activity.date}T${activity.endTime}`);
+
+      if (now >= startTime && now <= endTime) {
+        const minutesLeft = Math.round((endTime.getTime() - now.getTime()) / 60000);
+        return {
+          title: 'IN PROGRESS',
+          message: `${activity.name} (ends in ${minutesLeft} min)`
+        };
+      }
+    }
+
+    const upcomingActivities = todaysActivities.filter(a => {
+      const startTime = new Date(`${a.date}T${a.startTime}`);
+      return startTime > now;
+    });
+
+    if (upcomingActivities.length > 0) {
+      const nextActivity = upcomingActivities[0];
+      return {
+        title: `UP NEXT (${nextActivity.startTime})`,
+        message: `${nextActivity.name}`
+      };
+    }
+
+    return { title: 'FOCUS COMPLETE', message: 'All tasks for today are done. Well done.' };
+  }, [now, activities, getLocalYYYYMMDD]);
+
 
   const activitiesByDate = useMemo(() => {
     const groups: Record<string, Activity[]> = {};
@@ -377,6 +509,84 @@ function App() {
     });
     return groups;
   }, [activities]);
+
+  const triggerDayReview = async () => {
+    // Prevent re-triggering if already open
+    if (isReviewPanelOpen || isGeneratingSuggestions) return;
+
+    localStorage.setItem('lastReviewDate', getLocalYYYYMMDD(now));
+    setIsGeneratingSuggestions(true);
+    setAiSuggestions([]);
+    setIsReviewPanelOpen(true);
+
+    const todayStr = getLocalYYYYMMDD(now);
+    const tomorrowStr = getLocalYYYYMMDD(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+
+    const todaysActivities = activities.filter(a => a.date === todayStr);
+    const tomorrowsExistingActivities = activities.filter(a => a.date === tomorrowStr);
+
+    // Construct a detailed summary of the user's day for the AI
+    const prompt = `
+      Based on my performance today and my overall goals, create a schedule for tomorrow.
+
+      My Overall Goal Domains (higher weight means more important):
+      ${JSON.stringify(domainWeights, null, 2)}
+
+      My Active Goals:
+      ${goals.filter(g => g.isActive).map(g => `- ${g.title} (Type: ${g.type})`).join('\n')}
+      
+      Today's (${todayStr}) Performance Summary:
+      - Integrity Score: ${integrityScore}%
+      - Goal Insight: ${goalInsight.message}
+      - Priority Insight: ${priorityInsight.message}
+      - Activities Executed: ${todaysActivities.filter(a => a.status === 'complete').length}
+      - Activities Missed: ${todaysActivities.filter(a => a.status === 'missed' || a.status === 'partial').length}
+
+      Tomorrow's (${tomorrowStr}) Existing Commitments (do not schedule over these):
+      ${tomorrowsExistingActivities.map(a => `- ${a.name} from ${a.startTime} to ${a.endTime}`).join('\n') || 'None'}
+
+      INSTRUCTIONS:
+      1. Analyze my performance, especially the goal and priority insights.
+      2. Identify which goals I neglected or need to focus on.
+      3. Create a list of 2-4 suggested activities for tomorrow that will help me get back on track with my goals.
+      4. Place these activities in logical, empty time slots, avoiding my existing commitments.
+      5. VERY IMPORTANT: Respond ONLY with a valid JSON array of "Activity" objects. Do not include any other text, explanation, or markdown. The structure for each activity must be: { "id": "uuid", "name": "...", "date": "${tomorrowStr}", "startTime": "HH:MM", "endTime": "HH:MM", "domain": "...", "status": "planned", "goalId": "null | string" }
+    `;
+
+    try {
+      const result = await generateIntent(prompt, "planner");
+      const suggested = JSON.parse(result.response) as Activity[];
+
+      // Ensure the suggestions are valid and for tomorrow
+      const validSuggestions = suggested.filter(s => s.date === tomorrowStr);
+      setAiSuggestions(validSuggestions);
+
+    } catch (error) {
+      console.error("Error generating AI suggestions:", error);
+      showToast("Failed to generate plan for tomorrow.");
+    } finally {
+      setIsGeneratingSuggestions(false);
+    }
+  };
+
+  const handleCommitToTomorrow = (suggestedActivities: Activity[]) => {
+    setActivities(prev => [...prev, ...suggestedActivities]);
+    setIsReviewPanelOpen(false);
+    showToast("Tomorrow's plan is committed. See you then!");
+  };
+
+
+
+  useEffect(() => {
+    const REVIEW_HOUR = 20; // 8 PM
+    const lastReview = localStorage.getItem('lastReviewDate');
+    const todayStr = getLocalYYYYMMDD(now);
+
+    if (now.getHours() >= REVIEW_HOUR && lastReview !== todayStr) {
+      triggerDayReview();
+    }
+  }, [now]); // This effect runs every minute because `now` updates
+
 
   // Add this useEffect block around line 305
   useEffect(() => {
@@ -580,14 +790,27 @@ function App() {
 
   const confirmActivity = () => {
     if (previewActivity && user) {
-      const newActivities = [...activities, previewActivity];
+      let activityToCommit = { ...previewActivity };
+
+      if (selectedGoalId) {
+        const goal = goals.find(g => g.id === selectedGoalId);
+        if (goal) {
+          activityToCommit.goalId = goal.id;
+          activityToCommit.goalType = goal.type;
+        }
+      }
+
+      const newActivities = [...activities, activityToCommit];
       setActivities(newActivities);
       setDoc(doc(db, 'users', user.uid), { activities: newActivities }, { merge: true });
+
       setPreviewActivity(null);
+      setSelectedGoalId(null); // Reset selected goal
       setPlannerInput('');
       setToast('Activity Committed');
     }
   };
+
 
   // Replace the old update/delete functions with these new versions
 
@@ -712,6 +935,52 @@ function App() {
       console.log("Deletion cancelled by user.");
     }
     setExpandedActivityId(null);
+  };
+
+  const addGoal = async (goal: Omit<Goal, 'id' | 'createdAt' | 'updatedAt' | 'isActive'>) => {
+    if (!user) return;
+    const newGoal: Goal = {
+      ...goal,
+      id: generateId(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isActive: true,
+    };
+    const goalDocRef = doc(db, 'users', user.uid, 'goals', newGoal.id);
+    await setDoc(goalDocRef, newGoal);
+    setGoals(prev => [...prev, newGoal]);
+    setToast('Goal Added');
+  };
+
+  const updateGoal = async (goalToUpdate: Goal) => {
+    if (!user) return;
+    const updatedGoal = { ...goalToUpdate, updatedAt: new Date().toISOString() };
+    const goalDocRef = doc(db, 'users', user.uid, 'goals', updatedGoal.id);
+    await setDoc(goalDocRef, updatedGoal, { merge: true });
+    setGoals(prev => prev.map(g => g.id === updatedGoal.id ? updatedGoal : g));
+    setToast('Goal Updated');
+  };
+
+  const deleteGoal = async (goalId: string) => {
+    if (!user) return;
+    if (window.confirm('Are you sure you want to delete this goal? This will unlink it from all activities.')) {
+      const goalDocRef = doc(db, 'users', user.uid, 'goals', goalId);
+      await deleteDoc(goalDocRef);
+      setGoals(prev => prev.filter(g => g.id !== goalId));
+
+      // Unlink this goal from any activities
+      const newActivities = activities.map(act => {
+        if (act.goalId === goalId) {
+          const { goalId: _, goalType: __, ...rest } = act;
+          return rest;
+        }
+        return act;
+      });
+      setActivities(newActivities);
+      await setDoc(doc(db, 'users', user.uid), { activities: newActivities }, { merge: true });
+
+      setToast('Goal Deleted');
+    }
   };
 
 
@@ -920,10 +1189,10 @@ function App() {
       <div className="os-main">
         {/* Replace the os-banner-row with this new version */}
         <div className="os-banner-row">
-          <header className={`os-status-banner ${integrityScore > 70 ? 'is-aligned' : 'is-neutral'}`}>
+          <header className={`os-status-banner is-neutral`}>
             <div className="banner-text">
-              <h2>Integrity Engine</h2>
-              <p>{integrityScore}% congruence.</p>
+              <h2>{currentTaskInsight.title}</h2>
+              <p>{currentTaskInsight.message}</p>
             </div>
           </header>
           <header className={`os-status-banner os-insight-banner is-${priorityInsight.status}`}>
@@ -936,6 +1205,18 @@ function App() {
             <div className="banner-text">
               <h2>Weekly Insight</h2>
               <p>{weeklyInsight.message}</p>
+            </div>
+          </header>
+          <header className="os-status-banner is-neutral" onClick={() => setIsGoalsPanelOpen(true)} style={{ cursor: 'pointer' }}>
+            <div className="banner-text">
+              <h2>Mission Control</h2>
+              <p>Manage Goals</p>
+            </div>
+          </header>
+          <header className={`os-status-banner os-insight-banner is-${goalInsight.status}`}>
+            <div className="banner-text">
+              <h2>Goal Insight</h2>
+              <p>{goalInsight.message}</p>
             </div>
           </header>
         </div>
@@ -968,6 +1249,20 @@ function App() {
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
                       <p>{previewActivity.intent}</p>
                     </div>
+                    <div className="preview-goal-selector">
+                      <select
+                        value={selectedGoalId || ''}
+                        onChange={(e) => setSelectedGoalId(e.target.value || null)}
+                      >
+                        <option value="">No Goal</option>
+                        {goals.filter(g => g.isActive).map(g => (
+                          <option key={g.id} value={g.id}>
+                            [{g.type === 'short_term' ? 'S' : 'L'}] {g.title}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {/* END OF NEW DIV */}
                   </div>
                   <div className="os-preview-actions">
                     <button className="btn-discard" onClick={() => setPreviewActivity(null)}>DISCARD</button>
@@ -1031,6 +1326,13 @@ function App() {
                               {a.startTime} - {a.endTime}
                             </span>
                             <span className="row-name">{a.name}</span>
+                            {/* ADD THIS SPAN TO DISPLAY THE GOAL */}
+                            {a.goalId && (
+                              <span className="row-goal-link">
+                                → {goals.find(g => g.id === a.goalId)?.title || 'Linked Goal'}
+                              </span>
+                            )}
+                            {/* END OF NEW SPAN */}
                           </div>
                           <div className="activity-status-container">
                             {expandedActivityId === a.id ? (
@@ -1122,6 +1424,29 @@ function App() {
           </div>
         </div>
       )}
+      <GoalsPanel
+        isOpen={isGoalsPanelOpen}
+        onClose={() => setIsGoalsPanelOpen(false)}
+        goals={goals}
+        addGoal={addGoal}
+        updateGoal={updateGoal}
+        deleteGoal={deleteGoal}
+      />
+      <DayReviewPanel
+        isOpen={isReviewPanelOpen}
+        onClose={() => setIsReviewPanelOpen(false)}
+        onCommit={handleCommitToTomorrow}
+        reviewData={{
+          integrityScore,
+          goalInsight,
+          priorityInsight,
+          todaysActivities: activities.filter(a => a.date === getLocalYYYYMMDD(now))
+        }}
+        aiSuggestions={aiSuggestions}
+        isGenerating={isGeneratingSuggestions}
+      />
+
+
     </div>
   );
 }

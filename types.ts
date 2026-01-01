@@ -15,6 +15,24 @@ export interface DomainWeights {
 
 export type ActivityStatus = 'planned' | 'complete' | 'partial' | 'cancel' | 'missed';
 
+// --- NEW: Goal System Types ---
+export type GoalType = 'short_term' | 'long_term';
+export type GoalCategory = 'Health' | 'Career' | 'Project' | 'Finance' | 'Leisure' | 'Relationships' | 'Other';
+
+export interface Goal {
+  id: string;
+  type: GoalType;
+  title: string;
+  category: GoalCategory;
+  description?: string;
+  targetDate?: string; // YYYY-MM-DD
+  createdAt: string;   // ISO String
+  updatedAt: string;   // ISO String
+  isActive: boolean;
+}
+// --- END: Goal System Types ---
+
+
 export interface Activity {
   id: string;
   name: string;
@@ -26,6 +44,10 @@ export interface Activity {
   status: ActivityStatus;
   date: string;      // YYYY-MM-DD
   intent?: string;   // AI's reasoning for classification
+  // --- NEW: Link to Goals ---
+  goalId?: string;
+  goalType?: GoalType;
+  // --- END: Link to Goals ---
 }
 
 export interface LifePeriod {

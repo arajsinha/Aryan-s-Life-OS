@@ -1,0 +1,46 @@
+
+steps:
+# --- FRONTEND BUILD & DEPLOY ---
+# 1. Install dependencies
+- name: 'gcr.io/cloud-builders/npm'
+  args: ['ci']
+
+# 2. Build the Vite app
+- name: 'gcr.io/cloud-builders/npm'
+  args: ['run', 'build']
+  env:
+  - 'VITE_GEMINI_API_KEY=${_VITE_GEMINI_API_KEY}'
+
+# 3. Build the production Docker image
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/$PROJECT_ID/life-os', '.']
+
+# 4. Push the Docker image
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'gcr.io/$PROJECT_ID/life-os']
+
+# 5. Deploy to Cloud Run in the correct project
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: gcloud
+  args:
+  - 'run'
+  - 'deploy'
+  - 'life-os'
+  - '--image=gcr.io/$PROJECT_ID/life-os'
+  - '--region=us-west1'
+  - '--platform=managed'
+  - '--allow-unauthenticated'
+  - '--port=80'
+  - '--project=gen-lang-client-0111101516' # Target project for Cloud Run
+
+images:
+- 'gcr.io/$PROJECT_ID/life-os'
+
+substitutions:
+  _VITE_GEMINI_API_KEY: ''
+
+# This service account runs the build and needs permission to deploy to the target project.
+serviceAccount: 'projects/lifeos-34266/serviceAccounts/628462276092-compute@developer.gserviceaccount.com'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
