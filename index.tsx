@@ -977,6 +977,28 @@ function App() {
     setExpandedActivityId(null);
   };
 
+  const rescheduleActivity = (id: string) => {
+    if (!user) return;
+    const newStartTime = prompt("New Start Time (HH:mm):");
+    if (!newStartTime) return;
+    const newEndTime = prompt("New End Time (HH:mm):");
+    if (!newEndTime) return;
+
+    setActivities(prevActivities => {
+      const newActivities = prevActivities.map(act => {
+        if (act.id === id) {
+          return { ...act, startTime: newStartTime, endTime: newEndTime, status: 'planned' as const };
+        }
+        return act;
+      });
+      const docRef = doc(db, 'users', user.uid);
+      setDoc(docRef, { activities: newActivities }, { merge: true });
+      return newActivities;
+    });
+    setExpandedActivityId(null);
+    setToast('Activity Rescheduled');
+  };
+
 
 
   const deleteActivity = (id: string) => {
@@ -1170,102 +1192,43 @@ function App() {
     showToast("Steps logged!");
   };
 
-  const handleUpdateWorkout = async (workout: WorkoutExercise[]) => {
-    if (!user || !dailyLog) return;
-    const updatedLog: DailyFitnessLog = { ...dailyLog, loggedWorkout: workout };
-    setDailyLog(updatedLog);
-    const todayStr = getLocalYYYYMMDD(new Date());
-    await setDoc(doc(db, 'users', user.uid, 'dailyFitnessLogs', todayStr), { loggedWorkout: workout }, { merge: true });
-    showToast("Workout saved!");
-  };
+  // New analysis function
+  const analyzeDailyFitness = async () => {
+    if (!user || !fitnessGoal || !dailyLog) return;
+    showToast("Analyzing metabolic status...");
 
-  // Add this entire function before generateAndSaveHealthInsight
-  const createHealthPrompt = (
-    goal: FitnessGoal,
-    metrics: HealthMetric[],
-    todayLog: DailyFitnessLog | null,
-    yesterdayLog: any // Use 'any' for flexibility with Firebase data
-  ): string => {
-    const latestWeight = metrics[0]?.weight;
-
-    // Basic sanitization of logs to avoid sending huge data
-    const yesterdaySummary = yesterdayLog ? {
-      calories: (yesterdayLog.breakfast?.reduce((s: number, i: FoodItem) => s + i.calories, 0) || 0) + (yesterdayLog.lunch?.reduce((s: number, i: FoodItem) => s + i.calories, 0) || 0) + (yesterdayLog.dinner?.reduce((s: number, i: FoodItem) => s + i.calories, 0) || 0),
-      workout: yesterdayLog.loggedWorkout?.map((e: WorkoutExercise) => e.name) || "None",
-      steps: yesterdayLog.steps || 0
-    } : "No log";
-
-    const todaySummary = todayLog ? {
-      calories: (todayLog.breakfast?.reduce((s: number, i: FoodItem) => s + i.calories, 0) || 0) + (todayLog.lunch?.reduce((s: number, i: FoodItem) => s + i.calories, 0) || 0) + (todayLog.dinner?.reduce((s: number, i: FoodItem) => s + i.calories, 0) || 0),
-      steps: todayLog.steps || 0
-    } : "No log yet";
-
-    return `
-You are an expert AI fitness and nutrition coach. Your task is to provide a daily health briefing based on the user's goals and recent activity.
-
-**User's Goal:**
-- Goal: ${goal.goalType}
-- Current Weight: ${latestWeight || 'Not available'} kg
-- Ideal Weight: ${goal.idealWeight} kg
-- Height: ${goal.height} cm
-- Target Date: ${goal.targetDate}
-- Assumed TDEE (Total Daily Energy Expenditure): ${goal.tdee} kcal
-
-**Recent Data:**
-- Yesterday's Summary: ${JSON.stringify(yesterdaySummary)}
-- Today's Log (so far): ${JSON.stringify(todaySummary)}
-
-**Your Task:**
-Based on all the data above, generate a JSON object for today's AI Health Insight.
-
-**Output Rules:**
-1.  **workoutStatus**: Determine if today should be a 'Workout', 'Walk', or 'Rest' day.
-2.  **workoutSplit**: If it's a 'Workout' day, provide the specific muscle group split (e.g., "Push Day: Chest, Shoulders, Triceps"). If not, provide a reason (e.g., "Active Recovery").
-3.  **calorieTarget**: Calculate and provide a target calorie intake for today. Adjust based on TDEE, goal, and workout status. For a weight loss goal, this should be a deficit. For muscle building, a slight surplus. For rest days, it should be closer to maintenance.
-4.  **explanation**: A brief (1-2 sentence) explanation for your decisions.
-5.  **workoutPlan**: If workoutStatus is 'Workout', provide a JSON array of exercise objects.
-    - Each exercise object **MUST** have: \`name\` (string), \`idealSets\` (number), \`idealReps\` (string, e.g., "8-12" or "15").
-    - The exercises should match the \`workoutSplit\`.
-    - **DO NOT** include an 'id' field in the exercise objects.
-    - The entire workoutPlan **MUST** be an array of objects, not a stringified array.
-
-**Example output for a workout day:**
-\`\`\`json
-{
-  "workoutStatus": "Workout",
-  "workoutSplit": "Pull Day: Back & Biceps",
-  "calorieTarget": 2200,
-  "explanation": "Today is a pull day to balance yesterday's push workout. Calorie target is in a slight deficit to support fat loss while providing enough energy.",
-  "workoutPlan": [
-    {"name": "Pull-ups", "idealSets": 3, "idealReps": "As many as possible"},
-    {"name": "Bent Over Rows", "idealSets": 4, "idealReps": "8-12"},
-    {"name": "Bicep Curls", "idealSets": 3, "idealReps": "10-15"}
-  ]
-}
-\`\`\`
-
-Now, generate the JSON object for today.
-`;
-  };
-
-
-  const generateAndSaveHealthInsight = async () => {
-    const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
-    if (!user || !fitnessGoal) return;
-    showToast("Generating new AI Health Briefing...");
     try {
-      const today = new Date();
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
 
-      const prevLogRef = doc(db, 'users', user.uid, 'dailyFitnessLogs', getLocalYYYYMMDD(yesterday));
-      const prevLogSnap = await getDoc(prevLogRef);
-      const previousDayLog = prevLogSnap.exists() ? prevLogSnap.data() : null;
+      const prompt = `
+        Analyze the user's daily fitness effort to calculate TDEE and deficit.
+        
+        USER PROFILE:
+        - Height: ${fitnessGoal.height} cm
+        - Ideal Weight: ${fitnessGoal.idealWeight} kg
+        - Current Weight: ${healthMetrics[0]?.weight || 'Unknown'} kg
+        - Goal: ${fitnessGoal.goalType}
 
-      const prompt = createHealthPrompt(fitnessGoal, healthMetrics, dailyLog, previousDayLog);
+        TODAY'S ACTIVITY:
+        - Steps: ${dailyLog.steps || 0}
+        - Calories Consumed: ${(dailyLog.breakfast.reduce((s, i) => s + i.calories, 0) + dailyLog.lunch.reduce((s, i) => s + i.calories, 0) + dailyLog.dinner.reduce((s, i) => s + i.calories, 0))} kcal
+        - Workout: ${JSON.stringify(dailyLog.loggedWorkout || [])}
 
-      // --- Start of Definitive Fix ---
-      // Use the correct ai.models.generateContent with a defined JSON schema
+        TASK:
+        1.  Estimate TDEE based on activity level (steps + workout intensity).
+        2.  Calculate Calorie Deficit (TDEE - Consumed). Positive = Deficit, Negative = Surplus.
+        3.  Determine "Metabolic Phase" (e.g., "High Fat Burning", "Moderate Deficit", "Surplus/Building", "Maintenance").
+        4.  Provide a 1-sentence analysis of the effort.
+
+        OUTPUT JSON:
+        {
+          "tdee": number,
+          "deficit": number,
+          "metabolicPhase": string,
+          "analysis": string
+        }
+      `;
+
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: prompt,
@@ -1274,70 +1237,66 @@ Now, generate the JSON object for today.
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              workoutStatus: { type: Type.STRING },
-              workoutSplit: { type: Type.STRING },
-              calorieTarget: { type: Type.NUMBER },
-              explanation: { type: Type.STRING },
-              workoutPlan: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    idealSets: { type: Type.NUMBER },
-                    idealReps: { type: Type.STRING }
-                  },
-                  required: ['name', 'idealSets', 'idealReps']
-                }
-              }
+              tdee: { type: Type.NUMBER },
+              deficit: { type: Type.NUMBER },
+              metabolicPhase: { type: Type.STRING },
+              analysis: { type: Type.STRING }
             },
-            required: ['workoutStatus', 'workoutSplit', 'calorieTarget', 'explanation']
+            required: ['tdee', 'deficit', 'metabolicPhase', 'analysis']
           }
         }
       });
 
-      // const insight = response.candidates[0].content.parts[0].object as any;
-      // const insight = JSON.parse(response.response.text());
       const insight = JSON.parse(response.candidates[0].content.parts[0].text);
 
-
-      // --- End of Fix ---
-
-      // Safely process the workout plan, which is now guaranteed to be structured
-      if (insight.workoutPlan && Array.isArray(insight.workoutPlan)) {
-        insight.workoutPlan = insight.workoutPlan.map((ex: any) => {
-          // Assign a new, unique ID for this session's exercises
-          return { ...ex, id: generateId() };
-        });
-      } else {
-        insight.workoutPlan = []; // Ensure workoutPlan is an empty array if not provided
-      }
-
       const updatedLog: DailyFitnessLog = {
-        ...(dailyLog || {
-          date: getLocalYYYYMMDD(new Date()),
-          steps: 0,
-          breakfast: [],
-          lunch: [],
-          dinner: [],
-          workoutPlan: [],
-          loggedWorkout: [],
-          aiInsight: null,
-        }) as DailyFitnessLog,
-        aiInsight: insight,
-        workoutPlan: insight.workoutPlan || [],
-        loggedWorkout: []
+        ...dailyLog,
+        aiInsight: insight
       };
 
       setDailyLog(updatedLog);
       const todayStr = getLocalYYYYMMDD(new Date());
       await setDoc(doc(db, 'users', user.uid, 'dailyFitnessLogs', todayStr), updatedLog, { merge: true });
-      showToast("AI Health Briefing is ready!");
+      showToast("Analysis Complete!");
 
     } catch (error) {
-      console.error("Error generating health insight:", error);
-      showToast("Error generating insight. Please try again.");
+      console.error("Error analyzing fitness:", error);
+      showToast("Analysis failed. Try again.");
     }
+  };
+
+  const handleUpdateWorkout = async (workout: WorkoutExercise[]) => {
+    if (!user || !dailyLog) return;
+    const updatedLog: DailyFitnessLog = { ...dailyLog, loggedWorkout: workout };
+    setDailyLog(updatedLog);
+    const todayStr = getLocalYYYYMMDD(new Date());
+    await setDoc(doc(db, 'users', user.uid, 'dailyFitnessLogs', todayStr), { loggedWorkout: workout }, { merge: true });
+    showToast("Workout saved!");
+
+    // Automatically trigger analysis after saving workout
+    // We need to wait for state update in a real scenario, but here we can just call it with the new data context effectively
+    // But since analyzeDailyFitness uses 'dailyLog' state, we might need to pass data or rely on next render.
+    // For simplicity, let's just trigger it. In a perfect React world, we'd wait, but the user can also click 'Analyze'.
+    // Better yet, let's delay it slightly or rely on the user clicking analyze if they want immediate feedback, 
+    // OR, we make analyzeDailyFitness accept optional params. 
+    // For now, let's rely on the user clicking "Analyze" or the explicit button call in FitnessPanel.
+    // Actually, the user asked for "When I finish workout logging and save it... the AI should be able to figure out...".
+    // So we should try to trigger it. 
+    // A quick hack is to timeout, or pass the updated log to the function.
+    // Let's rely on the user clicking "Analyze Daily Effort" which I added to the UI, 
+    // OR we can make a `useEffect` in FitnessPanel or just separate the analysis logic.
+    // Let's leave handleUpdateWorkout as is, and let the USER click the new "Analyze" button or we can call it here if we refactor `analyzeDailyFitness` to take arguments.
+    // Given the constraints, I will leave the auto-trigger out of this specific function to avoid state race conditions, 
+    // and rely on the "Analyze Daily Effort" button I added to the FitnessPanel which is very prominent. 
+    // Wait, the user specifically asked "When I finish... and save it... it should get saved and AI should figure out".
+    // So I SHOULD trigger it.
+
+    // I will simply call it. It uses the `dailyLog` state. React state updates are async, so it might use the old log.
+    // To fix this properly in `index.tsx` without extensive refactoring: 
+    // I will NOT call it here directly because of the stale closure. 
+    // INSTEAD, I already added an "Analyze Daily Effort" button in FitnessPanel.tsx.
+    // I will instruct the user to click that, OR I can modify `FitnessPanel` to call `onGenerateInsight` after `onUpdateWorkout`.
+    // Let's modify `FitnessPanel` to do that chain.
   };
 
 
@@ -1768,6 +1727,14 @@ Now, generate the JSON object for today.
                               <div className="activity-actions-menu">
                                 <button onClick={() => updateActivityStatus(a.id, 'complete')} title="Complete">✓</button>
                                 <button onClick={() => updateActivityStatus(a.id, 'partial')} title="Partial">◐</button>
+                                <button onClick={() => rescheduleActivity(a.id)} title="Reschedule">
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                                    <line x1="16" y1="2" x2="16" y2="6" />
+                                    <line x1="8" y1="2" x2="8" y2="6" />
+                                    <line x1="3" y1="10" x2="21" y2="10" />
+                                  </svg>
+                                </button>
                                 <button onClick={() => updateActivityStatus(a.id, 'cancel')} title="Cancel">✗</button>
                                 <button onClick={() => deleteActivity(a.id)} title="Delete">🗑️</button>
                               </div>
@@ -1885,10 +1852,11 @@ Now, generate the JSON object for today.
         onAddFoodItem={onAddFoodItem}
         onUpdateSteps={handleUpdateSteps}
         onUpdateWorkout={handleUpdateWorkout}
-        onGenerateInsight={generateAndSaveHealthInsight}
+        onGenerateInsight={analyzeDailyFitness}
         onUpdateFitnessGoal={updateFitnessGoal}
         onDeleteFoodItem={handleDeleteFoodItem}
         onEditFoodItem={handleEditFoodItem}
+        userId={user?.uid || ''}
       />
     </div>
   );

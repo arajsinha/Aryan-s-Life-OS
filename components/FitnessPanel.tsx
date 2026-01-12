@@ -1,5 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
+import { db } from '../firebase';
+import { collection, query, orderBy, limit, getDocs, documentId } from 'firebase/firestore';
 import { HealthMetric, FitnessGoal, DailyFitnessLog, FoodItem, WorkoutExercise, WorkoutSet } from '../types';
 import { haptic } from '../utils/haptics';
 
@@ -13,16 +14,74 @@ interface FitnessPanelProps {
   onAddFoodItem: (meal: 'breakfast' | 'lunch' | 'dinner', foodText: string) => void;
   onUpdateSteps: (steps: number) => void;
   onUpdateWorkout: (workout: WorkoutExercise[]) => void;
-  onGenerateInsight: () => void; // New function to trigger AI generation
-  onUpdateFitnessGoal: (goal: FitnessGoal) => void; // Add this line
+  onGenerateInsight: () => void;
+  onUpdateFitnessGoal: (goal: FitnessGoal) => void;
   onDeleteFoodItem: (meal: 'breakfast' | 'lunch' | 'dinner', itemId: string) => void;
   onEditFoodItem: (
     meal: 'breakfast' | 'lunch' | 'dinner',
     itemId: string,
     newText: string
   ) => void;
-
+  userId: string;
 }
+
+// ...
+
+// Main Panel Component
+const FitnessPanel: React.FC<FitnessPanelProps> = (props) => {
+  const [view, setView] = useState<'dashboard' | 'workout' | 'history'>('dashboard');
+
+  if (!props.isOpen) {
+    return null;
+  }
+
+  const navigateToWorkout = () => {
+    haptic.light();
+    setView('workout');
+  };
+
+  const navigateToHistory = () => {
+    haptic.light();
+    setView('history');
+  }
+
+  const navigateToDashboard = () => {
+    haptic.light();
+    setView('dashboard');
+  }
+
+  return (
+    <div className="os-overlay-blur" onClick={props.onClose}>
+      <div className="goals-panel fitness-panel-wide" onClick={e => e.stopPropagation()}>
+        <header className="panel-header">
+          <h2>
+            {view === 'dashboard' ? 'Fitness & Health Hub' :
+              view === 'workout' ? 'Workout Logger' : 'History & Analysis'}
+          </h2>
+          <button onClick={props.onClose}>&times;</button>
+        </header>
+
+        <div className="panel-content custom-scroll">
+          {view === 'dashboard' && (
+            <DashboardView
+              {...props}
+              onNavigateToWorkout={navigateToWorkout}
+              onNavigateToHistory={navigateToHistory}
+            />
+          )}
+          {view === 'workout' && <WorkoutView {...props} onBack={navigateToDashboard} />}
+          {view === 'history' && (
+            <FitnessHistoryView
+              onBack={navigateToDashboard}
+              userId={props.userId}
+              fitnessGoal={props.fitnessGoal}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ADD THIS NEW COMPONENT
 const FitnessGoalHeader: React.FC<{
@@ -105,43 +164,10 @@ const FitnessGoalHeader: React.FC<{
 };
 
 
-// Main Panel Component
-const FitnessPanel: React.FC<FitnessPanelProps> = (props) => {
-  const [view, setView] = useState<'dashboard' | 'workout'>('dashboard');
 
-  if (!props.isOpen) {
-    return null;
-  }
-
-  const navigateToWorkout = () => {
-    haptic.light();
-    setView('workout');
-  };
-
-  const navigateToDashboard = () => {
-    haptic.light();
-    setView('dashboard');
-  }
-
-  return (
-    <div className="os-overlay-blur" onClick={props.onClose}>
-      <div className="goals-panel fitness-panel-wide" onClick={e => e.stopPropagation()}>
-        <header className="panel-header">
-          <h2>{view === 'dashboard' ? 'Fitness & Health Hub' : 'Workout Logger'}</h2>
-          <button onClick={props.onClose}>&times;</button>
-        </header>
-
-        <div className="panel-content custom-scroll">
-          {view === 'dashboard' && <DashboardView {...props} onNavigateToWorkout={navigateToWorkout} />}
-          {view === 'workout' && <WorkoutView {...props} onBack={navigateToDashboard} />}
-        </div>
-      </div>
-    </div>
-  );
-};
 
 // Dashboard View Component
-const DashboardView: React.FC<FitnessPanelProps & { onNavigateToWorkout: () => void }> = ({
+const DashboardView: React.FC<FitnessPanelProps & { onNavigateToWorkout: () => void; onNavigateToHistory: () => void }> = ({
   healthMetrics,
   addHealthMetric,
   fitnessGoal,
@@ -152,7 +178,8 @@ const DashboardView: React.FC<FitnessPanelProps & { onNavigateToWorkout: () => v
   onUpdateSteps,
   onGenerateInsight,
   onNavigateToWorkout,
-  onUpdateFitnessGoal
+  onUpdateFitnessGoal,
+  onNavigateToHistory
 }) => {
   const workoutStatus = getWorkoutCompletionStatus(dailyLog?.workoutPlan);
   const [weightInput, setWeightInput] = useState('');
@@ -221,26 +248,56 @@ const DashboardView: React.FC<FitnessPanelProps & { onNavigateToWorkout: () => v
     <>
       {/* --- AI Insight Bars --- */}
       <div className="ai-insight-section">
-        {/* <div className={`ai-insight-bar ${dailyLog?.aiInsight?.workoutStatus.toLowerCase()}`}> */}
-        <div className={`ai-insight-bar workout-${workoutStatus.toLowerCase()}`}>
-          <div className="insight-label">AI Daily Briefing</div>
-          <div className="insight-value">
-            {/* <span>{dailyLog?.aiInsight?.workoutStatus || 'Syncing...'}</span> */}
-            <span>{workoutStatusText}</span>
-            {dailyLog?.aiInsight?.workoutStatus === 'Workout' && (
-              <button className="btn-view-workout" onClick={onNavigateToWorkout}>VIEW →</button>
+        {dailyLog?.aiInsight ? (
+          <div className="ai-insight-bar metabolic-status-card">
+            <div className="insight-label">Daily Metabolic Status</div>
+            <div className="insight-main-stat">
+              <span className="stat-label">TDEE: </span>
+              <span className="stat-value">{dailyLog.aiInsight.tdee} <small>kcal</small></span>
+            </div>
+            <div className="insight-main-stat">
+              <span className="stat-label">Deficit: </span>
+              <span className="stat-value" style={{ color: dailyLog.aiInsight.deficit > 0 ? '#10b981' : '#ef4444' }}>
+                {dailyLog.aiInsight.deficit > 0 ? '-' : '+'}{Math.abs(dailyLog.aiInsight.deficit)} <small>kcal</small>
+              </span>
+            </div>
+            <div className="insight-phase">{dailyLog.aiInsight.metabolicPhase}</div>
+            <div className="insight-sub">{dailyLog.aiInsight.analysis}</div>
+          </div>
+        ) : (
+          <div className="ai-insight-bar placeholder-insight">
+            <div className="insight-label">Metabolic Analysis</div>
+            <div className="insight-sub">Log your workout & steps to see your metabolic status.</div>
+          </div>
+        )}
+
+        <div className="action-row">
+          <button className='btn-primary full-width' onClick={onNavigateToWorkout}>
+            Log Workout
+          </button>
+
+          <div className="secondary-actions-row" style={{ display: 'flex', gap: '10px' }}>
+            <button className='btn-secondary' style={{ flex: 1 }} onClick={onNavigateToHistory}>View History</button>
+            {/* Only show Analyze button if we have data but no insight yet, or if user wants to refresh */}
+            {(dailyLog?.steps || (dailyLog?.loggedWorkout && dailyLog.loggedWorkout.length > 0)) && (
+              <button className='btn-secondary' style={{ flex: 1 }} onClick={onGenerateInsight}>Analyze Today</button>
             )}
           </div>
-          <div className="insight-sub">{dailyLog?.aiInsight?.workoutSplit || 'Generate insight for today'}</div>
         </div>
-        <div className="ai-insight-bar calorie-bar">
-          <div className="insight-label">Calorie Target</div>
-          <div className="insight-value">{totalCalories} / <span>{calorieTarget} kcal</span></div>
+
+        <div className="ai-insight-bar calorie-bar" style={{ marginTop: '20px' }}>
+          <div className="insight-label">Calorie Tracker</div>
+          <div className="insight-value">{totalCalories} / <span>{Math.round(calorieTarget)} kcal</span></div>
           <div className="calorie-progress-track">
-            <div className="calorie-progress-fill" style={{ width: `${Math.min(calorieProgress, 100)}%` }}></div>
+            <div
+              className="calorie-progress-fill"
+              style={{
+                width: `${Math.min(calorieProgress, 100)}%`,
+                background: totalCalories > calorieTarget ? 'linear-gradient(90deg, #f97316, #fb923c)' : 'linear-gradient(90deg, #10b981, #34d399)'
+              }}
+            ></div>
           </div>
         </div>
-        <button className='btn-secondary' onClick={onGenerateInsight}>Refresh AI Insight</button>
       </div>
 
       {/* --- Loggers --- */}
@@ -360,18 +417,11 @@ const WORKOUT_STORAGE_KEY = 'lifeos_active_workout';
 // Workout View Component
 const WorkoutView: React.FC<FitnessPanelProps & { onBack: () => void }> = ({ dailyLog, onUpdateWorkout, onBack }) => {
   const [localWorkout, setLocalWorkout] = useState<WorkoutExercise[]>([]);
-
-  // useEffect(() => {
-  //   // Initialize local state from the prop, but add a loggedSets array if it's missing
-  //   const initialWorkout = dailyLog?.workoutPlan?.map(ex => ({ ...ex, loggedSets: ex.loggedSets || [] })) || [];
-  //   setLocalWorkout(initialWorkout);
-  // }, [dailyLog?.workoutPlan]);
+  const [newExerciseName, setNewExerciseName] = useState('');
 
   useEffect(() => {
-    if (!dailyLog?.workoutPlan) return;
-
+    // If we have a saved draft, load it
     const savedWorkout = localStorage.getItem(WORKOUT_STORAGE_KEY);
-
     if (savedWorkout) {
       try {
         setLocalWorkout(JSON.parse(savedWorkout));
@@ -381,31 +431,40 @@ const WorkoutView: React.FC<FitnessPanelProps & { onBack: () => void }> = ({ dai
       }
     }
 
-    const initialWorkout = dailyLog.workoutPlan.map(ex => ({
-      ...ex,
-      loggedSets: ex.loggedSets || [],
-    }));
-
-    setLocalWorkout(initialWorkout);
-  }, [dailyLog?.workoutPlan]);
+    // Otherwise load what's in the log (or empty)
+    if (dailyLog?.loggedWorkout) {
+      setLocalWorkout(dailyLog.loggedWorkout);
+    } else {
+      setLocalWorkout([]);
+    }
+  }, [dailyLog]); // Run once on mount/log change
 
 
   useEffect(() => {
-    if (localWorkout.length > 0) {
-      localStorage.setItem(
-        WORKOUT_STORAGE_KEY,
-        JSON.stringify(localWorkout)
-      );
-    }
+    localStorage.setItem(WORKOUT_STORAGE_KEY, JSON.stringify(localWorkout));
   }, [localWorkout]);
 
+
+  const addExercise = () => {
+    if (!newExerciseName.trim()) return;
+    const newExercise: WorkoutExercise = {
+      id: crypto.randomUUID(), // Use standard UUID if available or a simple generator
+      name: newExerciseName,
+      idealSets: 3, // Default
+      idealReps: "10", // Default
+      loggedSets: []
+    };
+    setLocalWorkout([...localWorkout, newExercise]);
+    setNewExerciseName('');
+    haptic.success();
+  };
 
 
   const addSet = (exerciseId: string) => {
     setLocalWorkout(currentWorkout => currentWorkout.map(ex => {
       if (ex.id === exerciseId) {
         // Find the last logged set to pre-fill the new one, or use defaults
-        const lastSet = ex.loggedSets[ex.loggedSets.length - 1] || { reps: 0, weight: 0 };
+        const lastSet = ex.loggedSets[ex.loggedSets.length - 1] || { reps: 10, weight: 0 };
         return { ...ex, loggedSets: [...ex.loggedSets, { ...lastSet }] };
       }
       return ex;
@@ -424,7 +483,6 @@ const WorkoutView: React.FC<FitnessPanelProps & { onBack: () => void }> = ({ dai
     }));
   };
 
-
   const handleSaveWorkout = () => {
     onUpdateWorkout(localWorkout);
     localStorage.removeItem(WORKOUT_STORAGE_KEY);
@@ -433,22 +491,34 @@ const WorkoutView: React.FC<FitnessPanelProps & { onBack: () => void }> = ({ dai
   };
 
 
-  if (!dailyLog?.workoutPlan) {
-    return <div><p>No workout plan generated for today.</p><button className='btn-secondary' onClick={onBack}>Go Back</button></div>
-  }
-
   return (
     <div className="workout-logger-view">
       <div className="workout-actions">
-        <button className='btn-secondary' onClick={onBack}>← Back to Dashboard</button>
-        <button className='btn-primary' onClick={handleSaveWorkout}>Save & Finish Workout</button>
+        <button className='btn-secondary' onClick={onBack}>← Back</button>
+        <button className='btn-primary' onClick={handleSaveWorkout}>Save Workout</button>
       </div>
+
+      <div className="add-exercise-box">
+        <input
+          type="text"
+          value={newExerciseName}
+          onChange={e => setNewExerciseName(e.target.value)}
+          placeholder="Exercise Name (e.g. Bench Press)"
+          onKeyDown={e => e.key === 'Enter' && addExercise()}
+        />
+        <button onClick={addExercise}>+ Add Exercise</button>
+      </div>
+
+      {localWorkout.length === 0 && (
+        <div className="empty-workout-state">
+          <p>No exercises logged yet. Add one above!</p>
+        </div>
+      )}
 
       {localWorkout.map(exercise => (
         <div key={exercise.id} className="exercise-card">
           <div className="exercise-header">
             <h4>{exercise.name}</h4>
-            <span>Target: {exercise.idealSets} sets of {exercise.idealReps} reps</span>
           </div>
           <div className="exercise-sets-log">
             <div className="sets-header"><span>SET</span><span>REPS</span><span>WEIGHT (kg)</span></div>
@@ -558,6 +628,189 @@ const MealSection: React.FC<{
       </div>
     );
   };
+
+
+// --- Fitness History View ---
+
+interface FitnessHistoryViewProps {
+  onBack: () => void;
+  userId: string;
+  fitnessGoal: FitnessGoal | null;
+}
+
+const FitnessHistoryView: React.FC<FitnessHistoryViewProps> = ({ onBack, userId, fitnessGoal }) => {
+  const [logs, setLogs] = useState<DailyFitnessLog[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Stats
+  const [avgDeficit, setAvgDeficit] = useState(0);
+  const [avgCalories, setAvgCalories] = useState(0);
+  const [totalWorkouts, setTotalWorkouts] = useState(0);
+  const [projectedDate, setProjectedDate] = useState<string | null>(null);
+  const [onTrackStatus, setOnTrackStatus] = useState<'ON_TRACK' | 'OFF_TRACK' | 'NEEDS_DATA'>('NEEDS_DATA');
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const historyRef = collection(db, 'users', userId, 'dailyFitnessLogs');
+        // Get last 90 days (approx 3 months)
+        // Note: Firestore text-based date keys might sort correctly, but better to query or just fetch all if volume is low.
+        // Given constraints, let's fetch all and filter in memory or sort. 
+        // Assuming YYYY-MM-DD keys sort naturally.
+
+        const q = query(historyRef, orderBy(documentId(), 'desc'), limit(90));
+        const snapshot = await getDocs(q);
+
+        const fetchedLogs = snapshot.docs.map(doc => doc.data() as DailyFitnessLog).filter(l => l.date); // Ensure date exists
+        setLogs(fetchedLogs);
+        calculateStats(fetchedLogs);
+      } catch (error) {
+        console.error("Error fetching fitness history:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchHistory();
+  }, [userId]);
+
+  const calculateStats = (data: DailyFitnessLog[]) => {
+    if (data.length === 0) return;
+
+    // Filter logs that have calorie data
+    const activeDays = data.filter(l => {
+      const cals = (l.breakfast?.reduce((s, i) => s + i.calories, 0) || 0) +
+        (l.lunch?.reduce((s, i) => s + i.calories, 0) || 0) +
+        (l.dinner?.reduce((s, i) => s + i.calories, 0) || 0);
+      return cals > 0;
+    });
+
+    if (activeDays.length === 0) return;
+
+    let totalDef = 0;
+    let totalCals = 0;
+    let workouts = 0;
+
+    activeDays.forEach(log => {
+      const cals = (log.breakfast?.reduce((s, i) => s + i.calories, 0) || 0) +
+        (log.lunch?.reduce((s, i) => s + i.calories, 0) || 0) +
+        (log.dinner?.reduce((s, i) => s + i.calories, 0) || 0);
+
+      const deficit = log.aiInsight?.deficit || 0;
+      // Fallback calculation if Ai insight missing but we have goal tdee
+      // const estimatedDeficit = (fitnessGoal?.tdee || 2000) - cals;
+
+      totalDef += deficit;
+      totalCals += cals;
+      if (log.loggedWorkout && log.loggedWorkout.length > 0) workouts++;
+    });
+
+    const avgDef = totalDef / activeDays.length;
+    setAvgDeficit(Math.round(avgDef));
+    setAvgCalories(Math.round(totalCals / activeDays.length));
+    setTotalWorkouts(workouts);
+
+    // On Track Logic
+    // standard rule: 7700 kcal = 1kg fat
+    // Weight loss rate per week = (avgDeficit * 7) / 7700
+    // If deficit is positive, we are losing weight.
+
+    if (fitnessGoal?.goalType.includes('loss') && avgDef > 0) {
+      setOnTrackStatus('ON_TRACK');
+      const lossPerWeek = (avgDef * 7) / 7700;
+      if (lossPerWeek < 0.2) setOnTrackStatus('OFF_TRACK'); // Too slow?
+    } else if (fitnessGoal?.goalType.includes('building') && avgDef < 0) {
+      // Building muscle often requires surplus (negative deficit)
+      setOnTrackStatus('ON_TRACK');
+    } else if (fitnessGoal?.goalType.includes('loss') && avgDef <= 0) {
+      setOnTrackStatus('OFF_TRACK');
+    }
+
+    // Simple Projection?
+    // Not implementing full date math for now, just status.
+  };
+
+  const getDayCalories = (log: DailyFitnessLog) => {
+    return (log.breakfast?.reduce((s, i) => s + i.calories, 0) || 0) +
+      (log.lunch?.reduce((s, i) => s + i.calories, 0) || 0) +
+      (log.dinner?.reduce((s, i) => s + i.calories, 0) || 0);
+  }
+
+  if (loading) {
+    return <div className="p-10 text-center">Loading History...</div>
+  }
+
+  return (
+    <div className="fitness-history-view">
+      <div className="history-header">
+        <button className='btn-secondary' onClick={onBack}>← Back</button>
+        <h3>90-Day History</h3>
+      </div>
+
+      {/* Analysis Card */}
+      <div className={`history-status-card ${onTrackStatus.toLowerCase()}`}>
+        <div className="status-title">
+          {onTrackStatus === 'ON_TRACK' ? 'ON TRACK' : onTrackStatus === 'OFF_TRACK' ? 'OFF TRACK' : 'INSUFFICIENT DATA'}
+        </div>
+        <div className="status-desc">
+          {onTrackStatus === 'ON_TRACK'
+            ? `Great job! You are averaging a ${avgDeficit > 0 ? 'deficit' : 'surplus'} consistent with your goal.`
+            : onTrackStatus === 'OFF_TRACK'
+              ? `You are averaging ${avgDeficit} deficit. You need to adjust your intake or activity to hit your goal.`
+              : "Log more days to get an analysis."}
+        </div>
+      </div>
+
+      <div className="history-stats-grid">
+        <div className="stat-box">
+          <span className="label">Avg Calories</span>
+          <span className="val">{avgCalories}</span>
+        </div>
+        <div className="stat-box">
+          <span className="label">Avg Deficit</span>
+          <span className="val" style={{ color: avgDeficit > 0 ? '#10b981' : '#ef4444' }}>
+            {avgDeficit > 0 ? '-' : '+'}{Math.abs(avgDeficit)}
+          </span>
+        </div>
+        <div className="stat-box">
+          <span className="label">Workouts</span>
+          <span className="val">{totalWorkouts}</span>
+        </div>
+      </div>
+
+      <div className="history-list">
+        {logs.map(log => {
+          const cals = getDayCalories(log);
+          const deficit = log.aiInsight?.deficit || 0;
+          const tdee = log.aiInsight?.tdee || fitnessGoal?.tdee || 2000;
+          const width = Math.min((cals / tdee) * 100, 100);
+          const isWorkout = log.loggedWorkout && log.loggedWorkout.length > 0;
+
+          return (
+            <div key={log.date} className="history-item">
+              <div className="date-col">
+                <span className="day">{new Date(log.date).getDate()}</span>
+                <span className="month">{new Date(log.date).toLocaleString('default', { month: 'short' })}</span>
+              </div>
+              <div className="bar-col">
+                <div className="mini-cal-bar">
+                  <div className="fill" style={{ width: `${width}%`, background: cals > tdee ? '#ef4444' : '#10b981' }}></div>
+                </div>
+                <div className="bar-meta">
+                  <span>{cals} kcal</span>
+                  {isWorkout && <span className="workout-badge">🏋️‍♂️</span>}
+                </div>
+              </div>
+              <div className="deficit-col" style={{ color: deficit > 0 ? '#10b981' : '#ef4444' }}>
+                {deficit > 0 ? '-' : '+'}{Math.abs(deficit)}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  );
+};
 
 
 export default FitnessPanel;

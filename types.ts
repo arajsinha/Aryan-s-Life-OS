@@ -35,7 +35,7 @@ export interface Goal {
   category: GoalCategory;
   description?: string; // The "qualitative why"
   status: GoalStatus;
-  
+
   // Optional metric for quantifiable goals
   metric?: GoalMetric;
 
@@ -104,23 +104,23 @@ export interface FoodItem {
 }
 
 export interface AIHealthInsight {
-  workoutStatus: 'Workout' | 'Walk' | 'Rest';
-  workoutSplit: string; // e.g., "Push Day: Chest, Shoulders, Triceps"
-  calorieTarget: number;
-  explanation: string; // AI's reasoning
+  tdee: number;
+  deficit: number;
+  metabolicPhase: string; // e.g., "Fat Burning", "Maintenance"
+  analysis: string; // Brief summary
 }
 
 export interface WorkoutSet {
-    reps: number;
-    weight: number; // in kg
+  reps: number;
+  weight: number; // in kg
 }
 
 export interface WorkoutExercise {
-    id: string;
-    name: string;
-    idealSets: number;
-    idealReps: string; // e.g., "8-12"
-    loggedSets: WorkoutSet[];
+  id: string;
+  name: string;
+  idealSets: number;
+  idealReps: string; // e.g., "8-12"
+  loggedSets: WorkoutSet[];
 }
 
 // This replaces the old DailyCalorieLog
