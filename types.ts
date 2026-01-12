@@ -27,6 +27,7 @@ export interface GoalMetric {
   target: number;
 }
 
+
 export interface Goal {
   id: string;
   type: GoalType;
@@ -59,7 +60,7 @@ export interface Activity {
   // --- NEW: Link to Goals ---
   goalId?: string;
   goalType?: GoalType;
-  // --- END: Link to Goals --
+  // --- END: Link to Goals ---
 }
 
 export interface LifePeriod {
@@ -75,4 +76,61 @@ export interface Artifact {
   html: string;
   status: 'streaming' | 'complete' | 'error';
   styleName: string;
+}
+
+// =====================================
+// --- NEW: Health & Fitness Types ---
+// =====================================
+
+export interface HealthMetric {
+  id: string;
+  date: string; // YYYY-MM-DD
+  weight?: number;
+  bodyFat?: number; // Optional
+}
+
+export interface FitnessGoal {
+  idealWeight: number;
+  height: number; // in cm
+  targetDate: string; // YYYY-MM-DD
+  goalType: 'Weight loss with muscle building' | 'Weight loss' | 'Muscle building';
+  tdee: number; // Total Daily Energy Expenditure
+}
+
+export interface FoodItem {
+  id: string;
+  name: string;
+  calories: number;
+}
+
+export interface AIHealthInsight {
+  workoutStatus: 'Workout' | 'Walk' | 'Rest';
+  workoutSplit: string; // e.g., "Push Day: Chest, Shoulders, Triceps"
+  calorieTarget: number;
+  explanation: string; // AI's reasoning
+}
+
+export interface WorkoutSet {
+    reps: number;
+    weight: number; // in kg
+}
+
+export interface WorkoutExercise {
+    id: string;
+    name: string;
+    idealSets: number;
+    idealReps: string; // e.g., "8-12"
+    loggedSets: WorkoutSet[];
+}
+
+// This replaces the old DailyCalorieLog
+export interface DailyFitnessLog {
+  date: string; // YYYY-MM-DD
+  breakfast: FoodItem[];
+  lunch: FoodItem[];
+  dinner: FoodItem[];
+  steps?: number;
+  workoutPlan?: WorkoutExercise[]; // The AI-generated plan for the day
+  loggedWorkout?: WorkoutExercise[]; // The user's actual logged workout
+  aiInsight?: AIHealthInsight;
 }

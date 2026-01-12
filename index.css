@@ -2682,3 +2682,936 @@ body {
 .goal-metric .metric-value {
   color: var(--text-main);
 }
+
+/* ================================== */
+/* --- Fitness Panel & Page V2 --- */
+/* ================================== */
+
+/* Make the panel wider */
+.fitness-panel-wide {
+  max-width: 900px;
+  /* Increased width */
+  max-height: 85vh;
+}
+
+/* Header section for displaying goals */
+.fitness-goal-header {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 16px;
+  margin-bottom: 24px;
+  border: 1px solid var(--border);
+}
+
+.fitness-goal-header .goal-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: center;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+}
+
+.fitness-goal-header .goal-metric span {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.fitness-goal-header .goal-metric strong {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.fitness-goal-header .goal-metric.full-width {
+  grid-column: 1 / -1;
+}
+
+
+/* Main container for the two loggers */
+.loggers-container {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  /* 2/3 for calorie, 1/3 for weight */
+  gap: 24px;
+}
+
+/* Calorie logger section */
+.calorie-logger {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.calorie-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.calorie-header h3 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.total-calories {
+  text-align: right;
+}
+
+.total-calories span {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.total-calories strong {
+  font-size: 1.1rem;
+  color: var(--accent);
+  margin-left: 8px;
+}
+
+.meal-section {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.meal-section h4 {
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin: 0 0 12px 0;
+  color: var(--text-dim);
+}
+
+.calorie-input-group {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.calorie-input-group input {
+  flex-grow: 1;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--text-main);
+  font-size: 0.9rem;
+}
+
+.calorie-input-group button {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.calorie-input-group button:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.food-item-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.food-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.food-item span:last-child {
+  font-family: 'Roboto Mono', monospace;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+
+/* Weight logger column */
+.weight-logger-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  padding: 16px;
+  align-self: flex-start;
+  /* Stick to the top */
+}
+
+.weight-logger-column h4 {
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.weight-input-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.weight-input-group input {
+  width: 100%;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--text-main);
+  font-size: 1.2rem;
+  font-weight: 700;
+  -moz-appearance: textfield;
+  /* Firefox */
+}
+
+.weight-input-group input::-webkit-outer-spin-button,
+.weight-input-group input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+
+.weight-input-group button {
+  flex-shrink: 0;
+  height: 38px;
+  border-radius: 8px;
+  padding: 0 16px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.weight-history {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.weight-history h4 {
+  text-align: left;
+  margin-bottom: 12px;
+}
+
+.metric-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metric-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.metric-list li:last-child {
+  border-bottom: none;
+}
+
+.metric-list li span {
+  font-family: 'Roboto Mono', monospace;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+/* Fitness Page Specific Styles */
+.os-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: calc(40px + var(--safe-top)) 40px calc(100px + var(--safe-bottom));
+}
+
+.os-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 40px;
+}
+
+.os-page-header h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.os-page-content {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+
+/* ================================== */
+/* --- Fitness Panel & Page V3 --- */
+/* ================================== */
+
+/* Make the panel wider */
+.fitness-panel-wide {
+  max-width: 900px;
+  max-height: 85vh;
+}
+
+/* --- AI Insight Section --- */
+.ai-insight-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.ai-insight-section .btn-secondary {
+  grid-column: 1 / -1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+}
+
+.ai-insight-bar {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-left: 4px solid var(--text-dim);
+}
+
+.ai-insight-bar.workout {
+  border-left-color: #f59e0b;
+}
+
+.ai-insight-bar.rest {
+  border-left-color: #3b82f6;
+}
+
+.ai-insight-bar.walk {
+  border-left-color: #10b981;
+}
+
+.insight-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.insight-value {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--text-main);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.insight-sub {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.btn-view-workout {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
+  color: #f59e0b;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* Calorie Bar specifics */
+.calorie-bar .insight-value {
+  color: #10b981;
+}
+
+.calorie-bar .insight-value span {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+}
+
+.calorie-progress-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.calorie-progress-fill {
+  height: 100%;
+  background: #10b981;
+  border-radius: 3px;
+  transition: width 0.5s ease-in-out;
+}
+
+
+/* Main container for the two loggers */
+.loggers-container {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 24px;
+}
+
+/* Calorie logger section */
+.calorie-logger {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.meal-section {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.meal-section h4 {
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin: 0 0 12px 0;
+  color: var(--text-dim);
+}
+
+.calorie-input-group {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.calorie-input-group input {
+  flex-grow: 1;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--text-main);
+  font-size: 0.9rem;
+}
+
+.calorie-input-group button {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.calorie-input-group button:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.food-item-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.food-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.food-item span:last-child {
+  font-family: 'Roboto Mono', monospace;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Combined Steps & Weight logger column */
+.weight-logger-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sub-logger-box {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.sub-logger-box h4 {
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin: 0 0 12px 0;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.steps-input-group,
+.weight-input-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.steps-input-group input,
+.weight-input-group input {
+  width: 100%;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--text-main);
+  font-size: 1.2rem;
+  font-weight: 700;
+  -moz-appearance: textfield;
+}
+
+.steps-input-group input::-webkit-outer-spin-button,
+.steps-input-group input::-webkit-inner-spin-button,
+.weight-input-group input::-webkit-outer-spin-button,
+.weight-input-group input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+
+.steps-input-group button,
+.weight-input-group button {
+  height: 42px;
+  border-radius: 8px;
+  padding: 0 16px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.weight-history {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.metric-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metric-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  padding: 4px 0;
+}
+
+.metric-list li span {
+  font-family: 'Roboto Mono', monospace;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+
+/* --- Workout Logger View --- */
+.workout-logger-view {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.workout-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.exercise-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.exercise-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.exercise-header h4 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.exercise-header span {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.exercise-sets-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sets-header {
+  display: grid;
+  grid-template-columns: 40px 1fr 1fr;
+  gap: 8px;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0 12px;
+}
+
+.set-row {
+  display: grid;
+  grid-template-columns: 40px 1fr 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.set-row span {
+  font-family: 'Roboto Mono', monospace;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.set-row input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--text-main);
+  text-align: center;
+  font-weight: 600;
+}
+
+.btn-add-set {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-add-set:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+
+/* --- NEW: Editable Fitness Goal Header --- */
+
+.fitness-goal-header {
+  display: flex;
+  align-items: flex-start;
+  /* Align items to the top */
+  gap: 16px;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 20px;
+  margin-bottom: 24px;
+  border: 1px solid var(--border);
+}
+
+.header-metrics-grid {
+  flex-grow: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  /* 4 columns for our metrics */
+  gap: 16px;
+}
+
+.goal-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 10px 12px;
+  border-radius: 10px;
+  text-align: center;
+}
+
+.goal-metric span {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.goal-metric strong {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.2;
+  height: 29px;
+  /* Fixed height to prevent layout shifts on edit */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.goal-metric.full-width {
+  grid-column: span 4;
+  /* Target Date spans the full width */
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.goal-metric input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  border-radius: 6px;
+  padding: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+  /* For Firefox */
+}
+
+.goal-metric input::-webkit-outer-spin-button,
+.goal-metric input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.goal-metric input[type="date"] {
+  text-align: right;
+  font-family: inherit;
+  font-weight: normal;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.goal-metric.full-width {
+  grid-column: span 4;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* --- NEW: Fitness Hub Color Theme --- */
+
+/* Add color to the main header metrics */
+.header-metrics-grid .goal-metric:nth-child(1) {
+  border-left: 3px solid #3b82f6;
+  /* Blue for Current Weight */
+}
+
+.header-metrics-grid .goal-metric:nth-child(2) {
+  border-left: 3px solid #10b981;
+  /* Green for Ideal Weight */
+}
+
+.header-metrics-grid .goal-metric:nth-child(3) {
+  border-left: 3px solid #a855f7;
+  /* Purple for Height */
+}
+
+.header-metrics-grid .goal-metric:nth-child(4) {
+  border-left: 3px solid #f59e0b;
+  /* Amber for Target Date */
+}
+
+/* Make the values in the header pop a bit more */
+.header-metrics-grid .goal-metric:nth-child(1) strong {
+  color: #3b82f6;
+}
+
+.header-metrics-grid .goal-metric:nth-child(2) strong {
+  color: #10b981;
+}
+
+.header-metrics-grid .goal-metric:nth-child(3) strong {
+  color: #a855f7;
+}
+
+.header-metrics-grid .goal-metric:nth-child(4) strong {
+  color: #f59e0b;
+}
+
+
+/* Colorize the meal section headers */
+.meal-section h4 {
+  border-left: 3px solid var(--border);
+  padding-left: 10px;
+  transition: border-color 0.3s;
+}
+
+.meal-section:nth-of-type(1) h4 {
+  border-left-color: #f59e0b;
+}
+
+/* Breakfast */
+.meal-section:nth-of-type(2) h4 {
+  border-left-color: #ef4444;
+}
+
+/* Lunch */
+.meal-section:nth-of-type(3) h4 {
+  border-left-color: #3b82f6;
+}
+
+/* Dinner */
+
+/* Make the "+" buttons for food items more vibrant */
+.calorie-input-group button {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #3b82f6;
+}
+
+.calorie-input-group button:hover {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+
+
+/* Add color accents to the right-hand column loggers */
+.weight-logger-column .sub-logger-box:nth-of-type(1) {
+  border-top: 3px solid #10b981;
+  /* Green for Steps */
+}
+
+.weight-logger-column .sub-logger-box:nth-of-type(2) {
+  border-top: 3px solid #a855f7;
+  /* Purple for Weight */
+}
+
+/* Style the LOG buttons consistently */
+.steps-input-group button,
+.weight-input-group button {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  transition: all 0.2s;
+}
+
+.steps-input-group button:hover,
+.weight-input-group button:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* --- Workout View Coloring --- */
+.workout-logger-view .btn-primary {
+  background: #10b981;
+  /* Green for "Save" */
+  border: 1px solid #10b981;
+}
+
+.workout-logger-view .btn-primary:hover {
+  filter: brightness(1.2);
+}
+
+.exercise-card {
+  border-left: 4px solid #f59e0b;
+  /* Amber accent for exercises */
+}
+
+.ai-insight-bar.workout-completed {
+  background: linear-gradient(135deg, #0f9d58, #34c759);
+  color: #fff;
+}
+
+.ai-insight-bar.workout-partial {
+  background: linear-gradient(135deg, #f4b400, #fbbc04);
+  color: #111;
+}
+
+.ai-insight-bar.workout-not_done {
+  background: linear-gradient(135deg, #d93025, #ea4335);
+  color: #fff;
+}
+
+
+.food-item.editable {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.icon-btn:hover {
+  opacity: 1;
+}
+
+.icon-btn.danger {
+  color: #d93025;
+}

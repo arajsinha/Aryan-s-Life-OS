@@ -6,17 +6,26 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
-import { Activity, LifePeriod, Domain, ActivityStatus, Goal } from './types';
+// import { Activity, LifePeriod, Domain, ActivityStatus, Goal, HealthMetric, FitnessGoal, DailyCalorieLog, FoodItem } from './types';
+// Around line 4
+// Replace 'DailyCalorieLog' with 'DailyFitnessLog' and add 'WorkoutExercise'
+import { Activity, LifePeriod, Domain, ActivityStatus, Goal, HealthMetric, FitnessGoal, DailyFitnessLog, FoodItem, WorkoutExercise } from './types';
+
+// Around line 11
+// Add query, where, etc. for fetching recent health data
+import { doc, getDoc, setDoc, collection, getDocs, deleteDoc, query, where } from "firebase/firestore";
+
 import { DOMAINS, DEFAULT_WEIGHTS, DOMAIN_COLORS } from './constants';
 import { generateId } from './utils';
 import Login from './components/Login';
 import { auth, db } from './firebase';
 import { signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, getDocs, deleteDoc } from "firebase/firestore";
+// import { doc, getDoc, setDoc, collection, getDocs, deleteDoc } from "firebase/firestore";
 import { User } from 'firebase/auth';
 import { SignalIcon, ThinkingIcon } from './components/Icons';
 import GoalsPanel from './components/GoalsPanel';
 import DayReviewPanel from './components/DayReviewPanel';
+import FitnessPanel from './components/FitnessPanel';
 import { haptic } from "@/utils/haptics";
 
 // import { apiKey } from './config';
@@ -94,12 +103,21 @@ function App() {
   const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
   // Add this line around line 84
   const [isIntelligenceLoading, setIsIntelligenceLoading] = useState(true);
+  const [isFitnessPanelOpen, setIsFitnessPanelOpen] = useState(false);
   const [now, setNow] = useState(new Date()); // ADD THIS
 
   // --- Sidebar Specific State ---
   const [todos, setTodos] = useState<{ id: string, text: string, done: boolean }[]>([]);
   const [scratchpad, setScratchpad] = useState('');
   const [todoInput, setTodoInput] = useState('');
+  // Around line 90
+  const [healthMetrics, setHealthMetrics] = useState<HealthMetric[]>([]);
+  // Around line 100
+  const [fitnessGoal, setFitnessGoal] = useState<FitnessGoal | null>(null);
+  const [dailyLog, setDailyLog] = useState<DailyFitnessLog | null>(null);
+
+
+
 
   // Add these lines around line 87 in index.tsx
   const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
@@ -184,6 +202,47 @@ function App() {
         setTodos(userData.todos || []);
         setScratchpad(userData.scratchpad || '');
         setUserLocation(userData.userLocation || '');
+        setHealthMetrics(userData.healthMetrics || []);
+        // Inside the main useEffect -> loadData function, replace the block from approx. line 208-232
+
+        // --- NEW: Load Fitness Data (V2) ---
+        let userFitnessGoal = userData.fitnessGoal;
+        if (!userFitnessGoal) {
+          // If no goal is set, create a default one and save it.
+          userFitnessGoal = {
+            idealWeight: 75,
+            height: 180,
+            targetDate: '2024-12-31',
+            goalType: 'Weight loss with muscle building',
+            tdee: 2000 // Add a default TDEE
+          };
+          setDoc(doc(db, 'users', user.uid), { fitnessGoal: userFitnessGoal }, { merge: true });
+        }
+        setFitnessGoal(userFitnessGoal);
+
+        // Load today's log from the 'dailyFitnessLogs' subcollection
+        const todayStr = getLocalYYYYMMDD(new Date());
+        const dailyLogRef = doc(db, 'users', user.uid, 'dailyFitnessLogs', todayStr);
+        const dailyLogSnap = await getDoc(dailyLogRef);
+
+        if (dailyLogSnap.exists()) {
+          setDailyLog(dailyLogSnap.data() as DailyFitnessLog);
+        } else {
+          // If no log exists for today, create a new, comprehensive one
+          const newLog: DailyFitnessLog = {
+            date: todayStr,
+            breakfast: [],
+            lunch: [],
+            dinner: [],
+            steps: 0,
+            workoutPlan: [],
+            loggedWorkout: [],
+            aiInsight: undefined, // Explicitly set as undefined
+          };
+          setDailyLog(newLog);
+          await setDoc(dailyLogRef, newLog);
+        }
+        // --- END: Load Fitness Data (V2) ---
       } else {
         console.log("No user data document found, starting fresh.");
       }
@@ -980,6 +1039,340 @@ function App() {
     setToast('Goal Added');
   };
 
+  const onAddFoodItem = async (meal: 'breakfast' | 'lunch' | 'dinner', foodText: string) => {
+    if (!user || !foodText.trim() || !dailyLog) return;
+
+    setToast(`Analyzing "${foodText}"...`);
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
+      const prompt = `Parse the following food entry into a JSON array of objects. Each object should have a "name" (string) and "calories" (number). Be as accurate as possible. If you cannot determine the calories, estimate them. Input: "${foodText}"`;
+
+      // --- Start of Fix ---
+      // Use the modern, schema-driven AI call to guarantee a JSON array response
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                calories: { type: Type.NUMBER }
+              },
+              required: ['name', 'calories']
+            }
+          }
+        }
+      });
+
+      // Correctly and safely parse the structured response
+      const parsedItems = JSON.parse(response.candidates[0].content.parts[0].text || '[]');
+      // --- End of Fix ---
+
+      if (!parsedItems || parsedItems.length === 0) {
+        throw new Error("AI could not identify any items.");
+      }
+
+      const newFoodItems: FoodItem[] = parsedItems.map((item: any) => ({
+        id: generateId(),
+        name: item.name,
+        calories: typeof item.calories === 'number' ? item.calories : 0
+      }));
+
+      const updatedLog: DailyFitnessLog = {
+        ...(dailyLog as DailyFitnessLog),
+        [meal]: [...dailyLog[meal], ...newFoodItems]
+      };
+      setDailyLog(updatedLog);
+
+      const todayStr = getLocalYYYYMMDD(new Date());
+      const dailyLogRef = doc(db, 'users', user.uid, 'dailyFitnessLogs', todayStr);
+      // Use { merge: true } to prevent overwriting concurrent updates (e.g., steps)
+      await setDoc(dailyLogRef, updatedLog, { merge: true });
+
+      showToast(`${newFoodItems.length} item(s) logged to ${meal}.`);
+
+    } catch (error) {
+      console.error("Error parsing food item:", error);
+      showToast("Sorry, I couldn't understand that food. Please be more specific.");
+    }
+  };
+
+  const handleDeleteFoodItem = async (
+    meal: 'breakfast' | 'lunch' | 'dinner',
+    itemId: string
+  ) => {
+    if (!user || !dailyLog) return;
+
+    const updatedMeal = dailyLog[meal].filter(item => item.id !== itemId);
+
+    const updatedLog: DailyFitnessLog = {
+      ...dailyLog,
+      [meal]: updatedMeal,
+    };
+
+    setDailyLog(updatedLog);
+
+    const todayStr = getLocalYYYYMMDD(new Date());
+    await setDoc(
+      doc(db, 'users', user.uid, 'dailyFitnessLogs', todayStr),
+      { [meal]: updatedMeal },
+      { merge: true }
+    );
+
+    showToast('Food item deleted');
+  };
+
+  const handleEditFoodItem = async (
+    meal: 'breakfast' | 'lunch' | 'dinner',
+    itemId: string,
+    newText: string
+  ) => {
+    if (!user || !dailyLog || !newText.trim()) return;
+
+    const updatedMeal = dailyLog[meal].map(item =>
+      item.id === itemId
+        ? { ...item, name: newText }
+        : item
+    );
+
+    const updatedLog: DailyFitnessLog = {
+      ...dailyLog,
+      [meal]: updatedMeal,
+    };
+
+    setDailyLog(updatedLog);
+
+    const todayStr = getLocalYYYYMMDD(new Date());
+    await setDoc(
+      doc(db, 'users', user.uid, 'dailyFitnessLogs', todayStr),
+      { [meal]: updatedMeal },
+      { merge: true }
+    );
+
+    showToast('Food item updated');
+  };
+
+
+
+  // After the onAddFoodItem function, around line 1200
+
+  const handleUpdateSteps = async (steps: number) => {
+    if (!user || !dailyLog) return;
+    const updatedLog: DailyFitnessLog = { ...dailyLog, steps };
+    setDailyLog(updatedLog);
+    const todayStr = getLocalYYYYMMDD(new Date());
+    await setDoc(doc(db, 'users', user.uid, 'dailyFitnessLogs', todayStr), { steps }, { merge: true });
+    showToast("Steps logged!");
+  };
+
+  const handleUpdateWorkout = async (workout: WorkoutExercise[]) => {
+    if (!user || !dailyLog) return;
+    const updatedLog: DailyFitnessLog = { ...dailyLog, loggedWorkout: workout };
+    setDailyLog(updatedLog);
+    const todayStr = getLocalYYYYMMDD(new Date());
+    await setDoc(doc(db, 'users', user.uid, 'dailyFitnessLogs', todayStr), { loggedWorkout: workout }, { merge: true });
+    showToast("Workout saved!");
+  };
+
+  // Add this entire function before generateAndSaveHealthInsight
+  const createHealthPrompt = (
+    goal: FitnessGoal,
+    metrics: HealthMetric[],
+    todayLog: DailyFitnessLog | null,
+    yesterdayLog: any // Use 'any' for flexibility with Firebase data
+  ): string => {
+    const latestWeight = metrics[0]?.weight;
+
+    // Basic sanitization of logs to avoid sending huge data
+    const yesterdaySummary = yesterdayLog ? {
+      calories: (yesterdayLog.breakfast?.reduce((s: number, i: FoodItem) => s + i.calories, 0) || 0) + (yesterdayLog.lunch?.reduce((s: number, i: FoodItem) => s + i.calories, 0) || 0) + (yesterdayLog.dinner?.reduce((s: number, i: FoodItem) => s + i.calories, 0) || 0),
+      workout: yesterdayLog.loggedWorkout?.map((e: WorkoutExercise) => e.name) || "None",
+      steps: yesterdayLog.steps || 0
+    } : "No log";
+
+    const todaySummary = todayLog ? {
+      calories: (todayLog.breakfast?.reduce((s: number, i: FoodItem) => s + i.calories, 0) || 0) + (todayLog.lunch?.reduce((s: number, i: FoodItem) => s + i.calories, 0) || 0) + (todayLog.dinner?.reduce((s: number, i: FoodItem) => s + i.calories, 0) || 0),
+      steps: todayLog.steps || 0
+    } : "No log yet";
+
+    return `
+You are an expert AI fitness and nutrition coach. Your task is to provide a daily health briefing based on the user's goals and recent activity.
+
+**User's Goal:**
+- Goal: ${goal.goalType}
+- Current Weight: ${latestWeight || 'Not available'} kg
+- Ideal Weight: ${goal.idealWeight} kg
+- Height: ${goal.height} cm
+- Target Date: ${goal.targetDate}
+- Assumed TDEE (Total Daily Energy Expenditure): ${goal.tdee} kcal
+
+**Recent Data:**
+- Yesterday's Summary: ${JSON.stringify(yesterdaySummary)}
+- Today's Log (so far): ${JSON.stringify(todaySummary)}
+
+**Your Task:**
+Based on all the data above, generate a JSON object for today's AI Health Insight.
+
+**Output Rules:**
+1.  **workoutStatus**: Determine if today should be a 'Workout', 'Walk', or 'Rest' day.
+2.  **workoutSplit**: If it's a 'Workout' day, provide the specific muscle group split (e.g., "Push Day: Chest, Shoulders, Triceps"). If not, provide a reason (e.g., "Active Recovery").
+3.  **calorieTarget**: Calculate and provide a target calorie intake for today. Adjust based on TDEE, goal, and workout status. For a weight loss goal, this should be a deficit. For muscle building, a slight surplus. For rest days, it should be closer to maintenance.
+4.  **explanation**: A brief (1-2 sentence) explanation for your decisions.
+5.  **workoutPlan**: If workoutStatus is 'Workout', provide a JSON array of exercise objects.
+    - Each exercise object **MUST** have: \`name\` (string), \`idealSets\` (number), \`idealReps\` (string, e.g., "8-12" or "15").
+    - The exercises should match the \`workoutSplit\`.
+    - **DO NOT** include an 'id' field in the exercise objects.
+    - The entire workoutPlan **MUST** be an array of objects, not a stringified array.
+
+**Example output for a workout day:**
+\`\`\`json
+{
+  "workoutStatus": "Workout",
+  "workoutSplit": "Pull Day: Back & Biceps",
+  "calorieTarget": 2200,
+  "explanation": "Today is a pull day to balance yesterday's push workout. Calorie target is in a slight deficit to support fat loss while providing enough energy.",
+  "workoutPlan": [
+    {"name": "Pull-ups", "idealSets": 3, "idealReps": "As many as possible"},
+    {"name": "Bent Over Rows", "idealSets": 4, "idealReps": "8-12"},
+    {"name": "Bicep Curls", "idealSets": 3, "idealReps": "10-15"}
+  ]
+}
+\`\`\`
+
+Now, generate the JSON object for today.
+`;
+  };
+
+
+  const generateAndSaveHealthInsight = async () => {
+    const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
+    if (!user || !fitnessGoal) return;
+    showToast("Generating new AI Health Briefing...");
+    try {
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      const prevLogRef = doc(db, 'users', user.uid, 'dailyFitnessLogs', getLocalYYYYMMDD(yesterday));
+      const prevLogSnap = await getDoc(prevLogRef);
+      const previousDayLog = prevLogSnap.exists() ? prevLogSnap.data() : null;
+
+      const prompt = createHealthPrompt(fitnessGoal, healthMetrics, dailyLog, previousDayLog);
+
+      // --- Start of Definitive Fix ---
+      // Use the correct ai.models.generateContent with a defined JSON schema
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              workoutStatus: { type: Type.STRING },
+              workoutSplit: { type: Type.STRING },
+              calorieTarget: { type: Type.NUMBER },
+              explanation: { type: Type.STRING },
+              workoutPlan: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    idealSets: { type: Type.NUMBER },
+                    idealReps: { type: Type.STRING }
+                  },
+                  required: ['name', 'idealSets', 'idealReps']
+                }
+              }
+            },
+            required: ['workoutStatus', 'workoutSplit', 'calorieTarget', 'explanation']
+          }
+        }
+      });
+
+      // const insight = response.candidates[0].content.parts[0].object as any;
+      // const insight = JSON.parse(response.response.text());
+      const insight = JSON.parse(response.candidates[0].content.parts[0].text);
+
+
+      // --- End of Fix ---
+
+      // Safely process the workout plan, which is now guaranteed to be structured
+      if (insight.workoutPlan && Array.isArray(insight.workoutPlan)) {
+        insight.workoutPlan = insight.workoutPlan.map((ex: any) => {
+          // Assign a new, unique ID for this session's exercises
+          return { ...ex, id: generateId() };
+        });
+      } else {
+        insight.workoutPlan = []; // Ensure workoutPlan is an empty array if not provided
+      }
+
+      const updatedLog: DailyFitnessLog = {
+        ...(dailyLog || {
+          date: getLocalYYYYMMDD(new Date()),
+          steps: 0,
+          breakfast: [],
+          lunch: [],
+          dinner: [],
+          workoutPlan: [],
+          loggedWorkout: [],
+          aiInsight: null,
+        }) as DailyFitnessLog,
+        aiInsight: insight,
+        workoutPlan: insight.workoutPlan || [],
+        loggedWorkout: []
+      };
+
+      setDailyLog(updatedLog);
+      const todayStr = getLocalYYYYMMDD(new Date());
+      await setDoc(doc(db, 'users', user.uid, 'dailyFitnessLogs', todayStr), updatedLog, { merge: true });
+      showToast("AI Health Briefing is ready!");
+
+    } catch (error) {
+      console.error("Error generating health insight:", error);
+      showToast("Error generating insight. Please try again.");
+    }
+  };
+
+
+
+  // Around line 1120
+  const addHealthMetric = async (metric: { weight: number }) => {
+    if (!user) return;
+    const newMetric: HealthMetric = {
+      ...metric,
+      id: generateId(),
+      date: getLocalYYYYMMDD(new Date()), // Re-uses your existing date helper
+    };
+    // Prepend the new metric and keep the list sorted by date
+    const newMetrics = [newMetric, ...healthMetrics].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    setHealthMetrics(newMetrics);
+    await setDoc(doc(db, 'users', user.uid), { healthMetrics: newMetrics }, { merge: true });
+    setToast('Weight Logged Successfully');
+  };
+
+  const updateFitnessGoal = async (updatedGoal: FitnessGoal) => {
+    if (!user) return;
+
+    const goalToSave = {
+      ...updatedGoal,
+      tdee: Number(updatedGoal.tdee) || 2000,
+      height: Number(updatedGoal.height) || 0,
+      idealWeight: Number(updatedGoal.idealWeight) || 0,
+    };
+
+    setFitnessGoal(goalToSave);
+    await setDoc(doc(db, 'users', user.uid), { fitnessGoal: goalToSave }, { merge: true });
+    showToast('Fitness Goal Updated!');
+  };
+
+
 
   const updateGoal = async (goalToUpdate: Goal) => {
     if (!user) return;
@@ -1242,6 +1635,13 @@ function App() {
               <p>Manage Goals</p>
             </div>
           </header>
+          <header className="os-status-banner is-neutral" onClick={() => setIsFitnessPanelOpen(true)} style={{ cursor: 'pointer' }}>
+            <div className="banner-text">
+              <h2>Fitness Hub</h2>
+              <p>Log & Track</p>
+            </div>
+          </header>
+
           <header className={`os-status-banner os-insight-banner is-${goalInsight.status}`}>
             <div className="banner-text">
               <h2>Goal Insight</h2>
@@ -1475,7 +1875,21 @@ function App() {
         isGenerating={isGeneratingSuggestions}
       />
 
-
+      <FitnessPanel
+        isOpen={isFitnessPanelOpen}
+        onClose={() => setIsFitnessPanelOpen(false)}
+        healthMetrics={healthMetrics}
+        addHealthMetric={addHealthMetric}
+        fitnessGoal={fitnessGoal}
+        dailyLog={dailyLog}
+        onAddFoodItem={onAddFoodItem}
+        onUpdateSteps={handleUpdateSteps}
+        onUpdateWorkout={handleUpdateWorkout}
+        onGenerateInsight={generateAndSaveHealthInsight}
+        onUpdateFitnessGoal={updateFitnessGoal}
+        onDeleteFoodItem={handleDeleteFoodItem}
+        onEditFoodItem={handleEditFoodItem}
+      />
     </div>
   );
 }
