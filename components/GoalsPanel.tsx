@@ -1,9 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
-import { Goal, GoalCategory, GoalType, GoalStatus, GoalMetric } from '../types.ts';
+import { Goal, GoalCategory, GoalType, GoalStatus, GoalMetric, Activity } from '../types.ts';
+import { GoalHealthDashboard } from './GoalHealthDashboard';
 
 interface GoalsPanelProps {
   goals: Goal[];
+  activities: Activity[]; // Added for analytics
   isOpen: boolean;
   onClose: () => void;
   addGoal: (goal: Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>) => void;
@@ -128,9 +130,10 @@ const GoalForm = ({ goal, onSave, onCancel, goalType }: { goal?: Goal | null, on
   );
 };
 
-const GoalsPanel = ({ isOpen, onClose, goals, addGoal, updateGoal, deleteGoal }: GoalsPanelProps) => {
+const GoalsPanel = ({ isOpen, onClose, goals, activities, addGoal, updateGoal, deleteGoal }: GoalsPanelProps) => {
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
   const [isAdding, setIsAdding] = useState<GoalType | null>(null);
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   if (!isOpen) return null;
 
@@ -191,27 +194,97 @@ const GoalsPanel = ({ isOpen, onClose, goals, addGoal, updateGoal, deleteGoal }:
             return (
               <div key={goal.id} className="goal-item">
                 <div className="goal-info">
+
                   <div className="goal-header">
                     <p className="goal-title">{goal.title}</p>
-                    <span className={`goal-status-badge status-${goal.status || 'not_started'}`}>{(goal.status || 'not_started').replace(/_/g, ' ')}</span>
+                    <span
+                      className={`goal-status-badge status-${goal.status || 'not_started'}`}
+                    >
+                      {(goal.status || 'not_started').replace(/_/g, ' ')}
+                    </span>
                   </div>
+
                   <div className="goal-meta">
                     <span className="goal-category">{goal.category}</span>
-                    {goal.targetDate && <span className="goal-date">{goal.targetDate}</span>}
+                    {goal.targetDate && (
+                      <span className="goal-date">{goal.targetDate}</span>
+                    )}
                   </div>
+
                   {goal.metric && (
                     <div className="goal-metric">
-                      <span className="metric-name">{goal.metric.name}: </span>
-                      <span className="metric-value">{goal.metric.current}{goal.metric.unit} → {goal.metric.target}{goal.metric.unit}</span>
+                      <span className="metric-name">{goal.metric.name}</span>
+                      <span className="metric-value">
+                        {goal.metric.current} {goal.metric.unit} ➔ {goal.metric.target}{" "}
+                        {goal.metric.unit}
+                      </span>
                     </div>
                   )}
-                </div>
-                <div className="goal-actions">
-                  <button onClick={() => { setIsAdding(null); setEditingGoal(goal); }}>Edit</button>
-                  <button onClick={() => deleteGoal(goal.id)}>Delete</button>
+
+                  {/* Buttons moved here */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: '12px',
+                      marginTop: '14px'
+                    }}
+                  >
+                    <button
+                      onClick={() => {
+                        setIsAdding(null);
+                        setEditingGoal(goal);
+                      }}
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: '0.85rem',
+                        fontWeight: '500',
+                        borderRadius: '6px',
+                        background: 'transparent',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        color: 'var(--text-dim)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                        e.currentTarget.style.color = 'var(--text)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.color = 'var(--text-dim)';
+                      }}
+                    >
+                      Edit
+                    </button>
+
+                    <button
+                      onClick={() => deleteGoal(goal.id)}
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: '0.85rem',
+                        fontWeight: '500',
+                        borderRadius: '6px',
+                        background: 'transparent',
+                        border: '1px solid rgba(239,68,68,0.4)',
+                        color: '#ef4444',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.background = 'rgba(239,68,68,0.1)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+
                 </div>
               </div>
             );
+
           })}
         </div>
       </div>
@@ -224,14 +297,46 @@ const GoalsPanel = ({ isOpen, onClose, goals, addGoal, updateGoal, deleteGoal }:
   return (
     <div className="os-overlay-blur" onClick={onClose}>
       <div className="goals-panel" onClick={e => e.stopPropagation()}>
-        <header className="panel-header">
+        <header className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2>Mission Control: Goals</h2>
-          <button onClick={onClose}>&times;</button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => setShowAnalytics(!showAnalytics)}
+              style={{
+                all: 'unset',              // hard reset all inherited button styles
+                padding: '10px 18px',
+                fontSize: '14px',
+                fontWeight: '600',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                background: showAnalytics ? '#2563eb' : '#2a2a2a',
+                color: '#ffffff',
+                border: '1px solid #3a3a3a',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'background 0.15s ease, transform 0.05s ease'
+              }}
+            >
+              {showAnalytics ? 'Hide Analytics' : 'Analytics View'}
+            </button>
+
+            <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
+          </div>
         </header>
         <div className="panel-content custom-scroll">
           {renderGoalList('short_term')}
           {renderGoalList('long_term')}
         </div>
+
+        {/* Analytics Overlay */}
+        {showAnalytics && (
+          <GoalHealthDashboard
+            goals={goals}
+            activities={activities}
+            onClose={() => setShowAnalytics(false)}
+          />
+        )}
       </div>
     </div>
   );

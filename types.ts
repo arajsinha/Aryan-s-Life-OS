@@ -42,6 +42,36 @@ export interface Goal {
   targetDate?: string; // YYYY-MM-DD
   createdAt: string;   // ISO String
   updatedAt: string;   // ISO String
+
+  // --- NEW: Analytics & Velocity ---
+  velocity?: VelocityMetrics;
+  prediction?: PredictionMetrics;
+  risk?: RiskAnalysis;
+}
+
+export type EffortLevel = 'Low' | 'Medium' | 'High' | 'Intense';
+export type VelocityTrend = 'accelerating' | 'decelerating' | 'stable';
+export type RiskLevel = 'ON_TRACK' | 'AT_RISK' | 'CRITICAL' | 'AHEAD_OF_PACE';
+
+export interface VelocityMetrics {
+  current: number;       // % or units per day
+  required: number;      // pace needed to hit target
+  trend: VelocityTrend;
+  rolling7Day: number;   // smoothed average
+}
+
+export interface PredictionMetrics {
+  completionDate: string | null;
+  daysRemaining: number;
+  confidenceInterval: {
+    optimistic: string;
+    pessimistic: string;
+  };
+}
+
+export interface RiskAnalysis {
+  level: RiskLevel;
+  reasons: string[];
 }
 // --- END: Goal System Types ---
 
@@ -57,6 +87,11 @@ export interface Activity {
   status: ActivityStatus;
   date: string;      // YYYY-MM-DD
   intent?: string;   // AI's reasoning for classification
+
+  // --- NEW: Goal Progress Integration ---
+  effortLevel?: EffortLevel;
+  workCompleted?: number; // The amount of "units" or "%" this activity contributed
+  progressNotes?: string;
   // --- NEW: Link to Goals ---
   goalId?: string;
   goalType?: GoalType;

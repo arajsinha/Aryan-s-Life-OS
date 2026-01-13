@@ -10,6 +10,7 @@ import ReactDOM from 'react-dom/client';
 // Around line 4
 // Replace 'DailyCalorieLog' with 'DailyFitnessLog' and add 'WorkoutExercise'
 import { Activity, LifePeriod, Domain, ActivityStatus, Goal, HealthMetric, FitnessGoal, DailyFitnessLog, FoodItem, WorkoutExercise } from './types';
+import { ActivityCompletionModal } from './components/ActivityCompletionModal';
 
 // Around line 11
 // Add query, where, etc. for fetching recent health data
@@ -93,6 +94,7 @@ function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isGoalsPanelOpen, setIsGoalsPanelOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [completingActivity, setCompletingActivity] = useState<Activity | null>(null); // NEW State
   const [heatmapView, setHeatmapView] = useState<'day' | 'week' | 'month'>('day');
   const [plannerInput, setPlannerInput] = useState('');
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
@@ -885,6 +887,8 @@ function App() {
   };
 
 
+
+
   // Replace the old update/delete functions with these new versions
 
   // const updateActivityStatus = (id: string, newStatus: ActivityStatus) => {
@@ -923,58 +927,89 @@ function App() {
   //   setExpandedActivityId(null); // Collapse the menu after action
   // };
 
-  const updateActivityStatus = (id: string, newStatus: ActivityStatus) => {
-    console.log(`Attempting to update activity ${id} to status ${newStatus}`);
-    if (!user) {
-      console.error("Update failed: User not logged in.");
-      return;
-    }
+  const updateActivityStatus = async (id: string, newStatus: ActivityStatus) => {
+    if (!user) return;
 
-    let startTime: string | null = null;
-    let endTime: string | null = null;
-
-    if (newStatus === 'partial') {
-      startTime = prompt("Please enter the actual start time (HH:mm):");
-      if (startTime) {
-        endTime = prompt("Please enter the actual end time (HH:mm):");
-      }
-      if (!startTime || !endTime) {
-        console.log("Partial update cancelled by user.");
-        setExpandedActivityId(null);
+    // 1. Check for Goal-Linked Completion (Trigger Modal)
+    if ((newStatus === 'complete' || newStatus === 'partial')) {
+      const activity = activities.find(a => a.id === id);
+      if (activity && activity.goalId) {
+        setCompletingActivity(activity);
         return;
       }
     }
 
-    setActivities(prevActivities => {
-      console.log("Calculating new activities array...");
-      const newActivities = prevActivities.map(act => {
-        if (act.id === id) {
-          const updatedActivity: Activity = { ...act, status: newStatus };
-          if (newStatus === 'partial' && startTime && endTime) {
-            updatedActivity.actualStartTime = startTime;
-            updatedActivity.actualEndTime = endTime;
-          }
-          console.log("Found and updated activity:", updatedActivity);
-          return updatedActivity;
+    // 2. Handle Partial Status Time Prompt (Legacy/Non-Goal)
+    let startTime: string | null = null;
+    let endTime: string | null = null;
+
+    if (newStatus === 'partial') {
+      startTime = prompt("Actual start time (HH:mm):");
+      if (startTime) endTime = prompt("Actual end time (HH:mm):");
+
+      if (!startTime || !endTime) {
+        // Cancelled
+        return;
+      }
+    }
+
+    // 3. Update Activity State & Persistence
+    const updatedActivities = activities.map(act => {
+      if (act.id === id) {
+        const updated: Activity = { ...act, status: newStatus };
+        if (newStatus === 'partial' && startTime && endTime) {
+          updated.actualStartTime = startTime;
+          updated.actualEndTime = endTime;
         }
-        return act;
-      });
-
-      // Save the newly calculated array directly to Firestore
-      console.log("Saving new activities array to Firestore...");
-      const docRef = doc(db, 'users', user.uid);
-      setDoc(docRef, { activities: newActivities }, { merge: true })
-        .then(() => {
-          console.log("Firestore update successful!");
-        })
-        .catch((error) => {
-          console.error("Firestore update failed:", error);
-        });
-
-      return newActivities;
+        return updated;
+      }
+      return act;
     });
 
-    setExpandedActivityId(null);
+    setActivities(updatedActivities);
+    // Ensure we use 'activities' field based on loadData
+    await setDoc(doc(db, 'users', user.uid), { activities: updatedActivities }, { merge: true });
+
+    /* // Haptic feedback if needed
+    if (newStatus === 'complete') {
+       // haptic.success(); 
+    } */
+  };
+
+  const handleCompletionSubmit = async (data: { effortLevel: any; workCompleted: number; notes: string }) => {
+    if (!user || !completingActivity) return;
+
+    // 1. Update Activity
+    const newStatus = 'complete';
+    const updatedActivities = activities.map(act =>
+      act.id === completingActivity.id ? {
+        ...act,
+        status: newStatus,
+        effortLevel: data.effortLevel,
+        workCompleted: data.workCompleted,
+        progressNotes: data.notes
+      } : act
+    );
+    setActivities(updatedActivities);
+
+    // 2. Update Goal Progress
+    if (completingActivity.goalId && data.workCompleted > 0) {
+      const goal = goals.find(g => g.id === completingActivity.goalId);
+      if (goal && goal.metric) {
+        const newCurrent = (goal.metric.current || 0) + data.workCompleted;
+        const updatedGoal = { ...goal, metric: { ...goal.metric, current: newCurrent }, updatedAt: new Date().toISOString() };
+
+        const newGoals = goals.map(g => g.id === goal.id ? updatedGoal : g);
+        setGoals(newGoals);
+        await setDoc(doc(db, 'users', user.uid, 'goals', goal.id), updatedGoal, { merge: true });
+      }
+    }
+
+    // 3. Persist Activities
+    await setDoc(doc(db, 'users', user.uid), { activities: updatedActivities }, { merge: true });
+
+    setCompletingActivity(null);
+    showToast("Progress logged!");
   };
 
   const rescheduleActivity = (id: string) => {
@@ -1778,6 +1813,17 @@ function App() {
 
       <LifePeriodBadge activePeriod={activePeriod} onClick={() => setIsDrawerOpen(true)} />
 
+      {/* Modals & Overlays */}
+      {completingActivity && (
+        <ActivityCompletionModal
+          activity={completingActivity}
+          goal={goals.find(g => g.id === completingActivity.goalId)}
+          onSubmit={handleCompletionSubmit}
+          onCancel={() => setCompletingActivity(null)}
+        />
+      )}
+
+      {/* Drawer */}
       {isDrawerOpen && (
         <div className="os-overlay-blur" onClick={() => setIsDrawerOpen(false)}>
           <div className="os-phase-drawer" onClick={e => e.stopPropagation()}>
@@ -1785,11 +1831,26 @@ function App() {
             <div className="os-drawer-scroll custom-scroll">
               <div className="os-input-field">
                 <label>Context Location</label>
-                <input type="text" value={userLocation} onChange={e => setUserLocation(e.target.value)} placeholder="e.g. London, UK" />
+                <input
+                  type="text"
+                  value={userLocation}
+                  onChange={e => setUserLocation(e.target.value)}
+                  onBlur={() => {
+                    if (user) setDoc(doc(db, 'users', user.uid), { userLocation }, { merge: true });
+                  }}
+                  placeholder="e.g. London, UK"
+                />
               </div>
               <div className="os-input-field">
                 <label>Phase Objective</label>
-                <input type="text" value={activePeriod?.title || ''} onChange={e => setLifePeriods(p => p.map(x => x.id === activePeriodId ? { ...x, title: e.target.value } : x))} />
+                <input
+                  type="text"
+                  value={activePeriod?.title || ''}
+                  onChange={e => setLifePeriods(p => p.map(x => x.id === activePeriodId ? { ...x, title: e.target.value } : x))}
+                  onBlur={() => {
+                    if (user) setDoc(doc(db, 'users', user.uid), { lifePeriods }, { merge: true });
+                  }}
+                />
               </div>
               <div className="os-input-field">
                 <label>Domain Weights</label>
@@ -1824,6 +1885,7 @@ function App() {
         isOpen={isGoalsPanelOpen}
         onClose={() => setIsGoalsPanelOpen(false)}
         goals={goals}
+        activities={activities}
         addGoal={addGoal}
         updateGoal={updateGoal}
         deleteGoal={deleteGoal}
