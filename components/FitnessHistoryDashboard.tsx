@@ -121,7 +121,7 @@ export const FitnessHistoryDashboard: React.FC<FitnessHistoryDashboardProps> = (
                 </header>
 
                 {/* Content */}
-                <div style={{ flex: 1, padding: '30px', maxWidth: '800px', margin: '0 auto', width: '100%', overflowY: 'auto' }}>
+                <div className="history-content" style={{ flex: 1, maxWidth: '800px', margin: '0 auto', width: '100%', overflowY: 'auto' }}>
 
                     {loading ? (
                         <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-dim)' }}>Loading your history...</div>
@@ -192,7 +192,7 @@ export const FitnessHistoryDashboard: React.FC<FitnessHistoryDashboardProps> = (
                                                 <div style={{ marginTop: '20px', borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
 
                                                     {/* Metrics Grid */}
-                                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+                                                    <div className="metrics-grid">
                                                         <MetricBox label="Steps" value={steps > 0 ? steps.toLocaleString() : '-'} icon="👣" />
                                                         <MetricBox label="Calories" value={`${totalCals} / ${tdee}`} icon="🔥" active={totalCals > 0} />
                                                         <MetricBox label="Weight" value={weight ? `${weight} kg` : '-'} icon="⚖️" active={!!weight} />
@@ -223,7 +223,7 @@ export const FitnessHistoryDashboard: React.FC<FitnessHistoryDashboardProps> = (
                                                     {totalCals > 0 && (
                                                         <div>
                                                             <h4 style={{ margin: '0 0 12px', fontSize: '0.9rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Nutrition Log</h4>
-                                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                                                            <div className="meal-grid">
                                                                 <MealColumn title="Breakfast" items={day.log?.breakfast} />
                                                                 <MealColumn title="Lunch" items={day.log?.lunch} />
                                                                 <MealColumn title="Dinner" items={day.log?.dinner} />

@@ -1429,7 +1429,7 @@ function App() {
 
         TODAY'S ACTIVITY:
         - Steps: ${dailyLog.steps || 0}
-        - Calories Consumed: ${(dailyLog.breakfast.reduce((s, i) => s + i.calories, 0) + dailyLog.lunch.reduce((s, i) => s + i.calories, 0) + dailyLog.dinner.reduce((s, i) => s + i.calories, 0))} kcal
+        - Calories Consumed: ${(dailyLog?.breakfast?.reduce((s, i) => s + i.calories, 0) || 0) + (dailyLog?.lunch?.reduce((s, i) => s + i.calories, 0) || 0) + (dailyLog?.dinner?.reduce((s, i) => s + i.calories, 0) || 0)} kcal
         - Workout: ${JSON.stringify(dailyLog.loggedWorkout || [])}
 
         TASK:
