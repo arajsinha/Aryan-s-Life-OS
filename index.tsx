@@ -14,7 +14,11 @@ import { ActivityCompletionModal } from './components/ActivityCompletionModal';
 
 // Around line 11
 // Add query, where, etc. for fetching recent health data
-import { doc, getDoc, setDoc, collection, getDocs, deleteDoc, query, where, arrayUnion } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs, deleteDoc, query, where, arrayUnion, orderBy, limit, documentId } from "firebase/firestore";
+import ReactMarkdown from 'react-markdown';
+
+
+
 
 import { DOMAINS, DEFAULT_WEIGHTS, DOMAIN_COLORS } from './constants';
 import { generateId } from './utils';
@@ -131,6 +135,103 @@ function App() {
   const [isReviewPanelOpen, setIsReviewPanelOpen] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<Activity[]>([]);
   const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false);
+
+  // Gemini Assistant State
+  interface ChatMessage { role: 'user' | 'assistant'; content: string; }
+  const [isGeminiOpen, setIsGeminiOpen] = useState(false);
+  const [geminiQuery, setGeminiQuery] = useState('');
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [isGeminiLoading, setIsGeminiLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom of chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory, isGeminiOpen]);
+
+  const handleGeminiQuery = async () => {
+    if (!geminiQuery.trim() || !user || isGeminiLoading) return;
+
+    const userMsg: ChatMessage = { role: 'user', content: geminiQuery };
+    setChatHistory(prev => [...prev, userMsg]);
+    setGeminiQuery(''); // Clear input immediately
+    setIsGeminiLoading(true);
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
+
+      // Gather Context
+      // Gather Context
+      const todayStr = getLocalYYYYMMDD(new Date());
+
+      // Fetch last 7 days explicitly to avoid Firestore index requirements on 'orderBy(documentId)'
+      const last7Days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        return getLocalYYYYMMDD(d);
+      });
+
+      const recentLogsPromises = last7Days.map(dateStr =>
+        getDoc(doc(db, 'users', user.uid, 'dailyFitnessLogs', dateStr))
+      );
+
+      const recentLogsSnapshots = await Promise.all(recentLogsPromises);
+      const recentLogData = recentLogsSnapshots
+        .map(snap => snap.exists() ? snap.data() : null)
+        .filter(data => data !== null);
+
+      const context = {
+        userProfile: {
+          fitnessGoal: fitnessGoal,
+          currentWeight: healthMetrics[0]?.weight,
+          location: userLocation
+        },
+        today: {
+          date: todayStr,
+          log: dailyLog,
+          activities: activities.filter(a => a.date === todayStr),
+          todos: todos.filter(t => !t.done)
+        },
+        recentHistory: recentLogData,
+        lifePeriods: lifePeriods,
+        chatHistory: chatHistory.slice(-5) // Include last 5 messages for context
+      };
+
+      const prompt = `
+        You are a highly intelligent, context-aware Life OS Assistant.
+        
+        USER CONTEXT:
+        ${JSON.stringify(context, null, 2)}
+
+        USER QUERY: "${userMsg.content}"
+
+        INSTRUCTIONS:
+        - Answer the user's query mainly using the provided context.
+        - Be concise, encouraging, and actionable.
+        - If asked about food/diet, use the TDEE and deficit data from 'today.log' and 'userProfile.fitnessGoal'.
+        - If asked about schedule, use 'today.activities'.
+        - If asked about progress, analyze 'recentHistory'.
+        - Format response in specific, clear sections if complex. Use markdown.
+      `;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: prompt
+      });
+
+      const text = response.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated.";
+
+      const aiMsg: ChatMessage = { role: 'assistant', content: text };
+      setChatHistory(prev => [...prev, aiMsg]);
+
+    } catch (error) {
+      console.error("Gemini Query Error:", error);
+      setToast('Failed to get answer from Gemini');
+      setChatHistory(prev => [...prev, { role: 'assistant', content: "I'm having trouble connecting right now. Please try again." }]);
+    } finally {
+      setIsGeminiLoading(false);
+    }
+  };
 
   const getLocalYYYYMMDD = useCallback((date: Date) => {
     const year = date.getFullYear();
@@ -1382,6 +1483,8 @@ function App() {
     }
   };
 
+
+
   const handleUpdateWorkout = async (workout: WorkoutExercise[]) => {
     if (!user || !dailyLog) return;
     const updatedLog: DailyFitnessLog = { ...dailyLog, loggedWorkout: workout };
@@ -1563,12 +1666,7 @@ function App() {
                 </svg>
               </button>
             </header>
-            <div className="zen-weather-box-inner">
-              <div className="weather-primary">
-                <span className="weather-location-label">{userLocation || 'Location Unset'}</span>
-                <div className="zen-weather-badge-v2">{intelligence.weather}</div>
-              </div>
-            </div>
+            {/* GEMINI REMOVED FROM SIDEBAR */}
           </section>
 
           {/* // Replace the JSX for your "SIGNALS" zen-card with this: */}
@@ -1687,6 +1785,75 @@ function App() {
       <div className="os-main">
         {/* Replace the os-banner-row with this new version */}
         <div className="os-banner-row">
+          {/* GEMINI ASSISTANT HEADER PILL */}
+          <div style={{ position: 'relative' }}>
+            <button
+              className={`gemini-circle-btn ${isGeminiOpen ? 'active' : ''}`}
+              onClick={() => setIsGeminiOpen(!isGeminiOpen)}
+              title="Ask Gemini"
+            >
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <path d="M12 2C13.5 7 17 10.5 22 12C17 13.5 13.5 17 12 22C10.5 17 7 13.5 2 12C7 10.5 10.5 7 12 2Z" />
+              </svg>
+            </button>
+
+            {/* GEMINI MODAL OVERLAY */}
+            {isGeminiOpen && (
+              <div className="gemini-modal-overlay" onClick={() => setIsGeminiOpen(false)}>
+                <div className="gemini-modal-content glass-card" onClick={e => e.stopPropagation()}>
+                  <header className="gemini-modal-header">
+                    <div className="gemini-icon-large">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                        <path d="M12 2C13.5 7 17 10.5 22 12C17 13.5 13.5 17 12 22C10.5 17 7 13.5 2 12C7 10.5 10.5 7 12 2Z" />
+                      </svg>
+                    </div>
+                    <h3>Gemini Assistant</h3>
+                    <button className="gemini-close-btn" onClick={() => setIsGeminiOpen(false)}>×</button>
+                  </header>
+
+                  <div className="gemini-response-area custom-scroll">
+                    {chatHistory.length > 0 ? (
+                      <div className="chat-stream">
+                        {chatHistory.map((msg, idx) => (
+                          <div key={idx} className={`chat-bubble ${msg.role}`}>
+                            {msg.role === 'assistant' ? (
+                              <ReactMarkdown>{msg.content}</ReactMarkdown>
+                            ) : (
+                              <span>{msg.content}</span>
+                            )}
+                          </div>
+                        ))}
+                        {isGeminiLoading && (
+                          <div className="chat-bubble assistant loading">
+                            <span className="dot-typing"></span>
+                          </div>
+                        )}
+                        <div ref={chatEndRef} />
+                      </div>
+                    ) : (
+                      <div className="gemini-placeholder">
+                        <p>Ask me anything about your health, schedule, or life goals.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="gemini-input-group modal-input-group">
+                    <input
+                      value={geminiQuery}
+                      onChange={e => setGeminiQuery(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleGeminiQuery()}
+                      placeholder="Ask Gemini..."
+                      disabled={isGeminiLoading}
+                      autoFocus
+                    />
+                    <button onClick={handleGeminiQuery} disabled={isGeminiLoading}>
+                      {isGeminiLoading ? <ThinkingIcon /> : '➤'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
           <header className={`os-status-banner is-neutral`}>
             <div className="banner-text">
               <h2>{currentTaskInsight.title}</h2>

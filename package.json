@@ -12,7 +12,8 @@
     "@google/genai": "^0.7.0",
     "firebase": "^12.7.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

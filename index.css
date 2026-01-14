@@ -4222,3 +4222,441 @@ body {
 .delete-btn:hover {
   background: rgba(239, 68, 68, 0.1);
 }
+
+/* Gemini Assistant */
+.gemini-pill-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: 8px;
+}
+
+.gemini-pill-btn:hover,
+.gemini-pill-btn.active {
+  background: rgba(59, 130, 246, 0.2);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.gemini-assistant-bar {
+  margin-top: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.gemini-response-area {
+  flex: 1;
+  /* Grow to fill space */
+  overflow-y: auto;
+  /* Scroll internally */
+  padding: 0 16px;
+  margin-bottom: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text-main);
+  display: flex;
+  flex-direction: column;
+}
+
+.gemini-message {
+  white-space: pre-wrap;
+}
+
+.gemini-placeholder {
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 0.85rem;
+  text-align: center;
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+.gemini-input-group {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  /* Don't shrink */
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.gemini-input-group input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: var(--text-main);
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.gemini-input-group input:focus {
+  border-color: var(--accent);
+}
+
+.gemini-input-group button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  width: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.gemini-input-group button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+/* Gemini Header & Dropdown */
+.gemini-banner.active {
+  background: rgba(59, 130, 246, 0.15) !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.2);
+}
+
+.gemini-dropdown {
+  position: absolute;
+  top: 110%;
+  /* Below the banner */
+  left: 0;
+  width: 340px;
+  background: rgba(10, 10, 10, 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  z-index: 1000;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  animation: slideDownFade 0.2s ease-out;
+}
+
+@keyframes slideDownFade {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.gemini-icon-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+/* Adjust os-banner-row to allow relative positioning for the dropdown parent */
+.os-banner-row>div {
+  position: relative;
+}
+
+/* Gemini Circular Button */
+.gemini-circle-btn {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+}
+
+.gemini-circle-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.6);
+}
+
+.gemini-circle-btn.active {
+  transform: scale(0.95);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+/* Gemini Modal */
+.gemini-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  animation: fadeIn 0.3s ease;
+}
+
+.gemini-modal-content {
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(10, 10, 10, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.gemini-modal-header {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.gemini-icon-large {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+}
+
+.gemini-modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  flex: 1;
+}
+
+.gemini-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0 8px;
+}
+
+.gemini-close-btn:hover {
+  color: var(--text-main);
+}
+
+.gemini-markdown-content {
+  font-size: 1rem;
+  line-height: 1.6;
+  color: #e5e7eb;
+}
+
+.gemini-markdown-content h1,
+.gemini-markdown-content h2,
+.gemini-markdown-content h3 {
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  color: white;
+}
+
+.gemini-markdown-content p {
+  margin-bottom: 1em;
+}
+
+.gemini-markdown-content strong {
+  color: var(--accent);
+}
+
+.gemini-markdown-content ul,
+.gemini-markdown-content ol {
+  padding-left: 20px;
+}
+
+.modal-input-group {
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.modal-input-group input {
+  padding: 12px 16px;
+  font-size: 1rem;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Chat Interface Upgrade */
+.gemini-modal-content {
+  width: 90%;
+  max-width: 900px;
+  height: 85vh;
+  /* Fixed height for stability */
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-stream {
+  flex: 1;
+  /* Take up all available space */
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  overflow-y: auto;
+  /* Scroll within this area */
+}
+
+.chat-bubble {
+  max-width: 80%;
+  padding: 12px 18px;
+  border-radius: 18px;
+  font-size: 1rem;
+  line-height: 1.5;
+  animation: fadeIn 0.3s ease;
+}
+
+.chat-bubble.user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-bubble.assistant {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  border-bottom-left-radius: 4px;
+}
+
+/* Markdown Styles inside Assistant Bubble */
+.chat-bubble.assistant p {
+  margin-bottom: 0.8em;
+}
+
+.chat-bubble.assistant p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-bubble.assistant h1,
+.chat-bubble.assistant h2,
+.chat-bubble.assistant h3 {
+  font-size: 1.1em;
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  color: #fff;
+}
+
+.chat-bubble.assistant strong {
+  color: var(--accent);
+}
+
+.chat-bubble.assistant ul,
+.chat-bubble.assistant ol {
+  padding-left: 20px;
+  margin-bottom: 0.8em;
+}
+
+/* Loading Animation */
+.dot-typing {
+  position: relative;
+  left: -9999px;
+  width: 6px;
+  height: 6px;
+  border-radius: 5px;
+  background-color: var(--text-dim);
+  color: var(--text-dim);
+  box-shadow: 9984px 0 0 0, 9999px 0 0 0, 10014px 0 0 0;
+  animation: dotTyping 1.5s infinite linear;
+  margin-left: 15px;
+  /* Offset for the hidden dot */
+  margin-right: 15px;
+}
+
+@keyframes dotTyping {
+  0% {
+    box-shadow: 9984px 0 0 0, 9999px 0 0 0, 10014px 0 0 0;
+  }
+
+  16.667% {
+    box-shadow: 9984px -6px 0 0, 9999px 0 0 0, 10014px 0 0 0;
+  }
+
+  33.333% {
+    box-shadow: 9984px 0 0 0, 9999px 0 0 0, 10014px 0 0 0;
+  }
+
+  50% {
+    box-shadow: 9984px 0 0 0, 9999px -6px 0 0, 10014px 0 0 0;
+  }
+
+  66.667% {
+    box-shadow: 9984px 0 0 0, 9999px 0 0 0, 10014px 0 0 0;
+  }
+
+  83.333% {
+    box-shadow: 9984px 0 0 0, 9999px 0 0 0, 10014px -6px 0 0;
+  }
+
+  100% {
+    box-shadow: 9984px 0 0 0, 9999px 0 0 0, 10014px 0 0 0;
+  }
+}
