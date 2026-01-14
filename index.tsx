@@ -76,6 +76,8 @@ function App() {
 
 
   // --- Global State ---
+  const [activeNoteActivityId, setActiveNoteActivityId] = useState<string | null>(null);
+  const [activePeriodId, setActivePeriodId] = useState<string>('initial');
   const [lifePeriods, setLifePeriods] = useState<LifePeriod[]>([{
     id: 'initial',
     title: 'Rest & Recover',
@@ -90,7 +92,7 @@ function App() {
   const lastFetchedLocation = useRef<string>('');
 
   // --- UI State ---
-  const [activePeriodId] = useState<string>(lifePeriods[0]?.id || '');
+  // const [activePeriodId] = useState<string>(lifePeriods[0]?.id || '');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isGoalsPanelOpen, setIsGoalsPanelOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -251,6 +253,16 @@ function App() {
     };
     loadData();
   }, [user]);
+
+  // Ensure activePeriodId is valid when lifePeriods change
+  useEffect(() => {
+    if (lifePeriods.length > 0) {
+      const isValid = lifePeriods.some(p => p.id === activePeriodId);
+      if (!isValid) {
+        setActivePeriodId(lifePeriods[0].id);
+      }
+    }
+  }, [lifePeriods, activePeriodId]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60000); // Update time every minute
@@ -935,6 +947,7 @@ function App() {
       const activity = activities.find(a => a.id === id);
       if (activity && activity.goalId) {
         setCompletingActivity(activity);
+        setExpandedActivityId(null); // Close the menu in the background
         return;
       }
     }
@@ -967,6 +980,7 @@ function App() {
     });
 
     setActivities(updatedActivities);
+    setExpandedActivityId(null); // Close the menu so the user sees the updated status pill
     // Ensure we use 'activities' field based on loadData
     await setDoc(doc(db, 'users', user.uid), { activities: updatedActivities }, { merge: true });
 
@@ -1032,6 +1046,67 @@ function App() {
     });
     setExpandedActivityId(null);
     setToast('Activity Rescheduled');
+  };
+
+  /* --- Activity Checklist & Notes Logic --- */
+
+  const saveActivityNotes = async (id: string, notes: string) => {
+    if (!user) return;
+    const updatedActivities = activities.map(act =>
+      act.id === id ? { ...act, executionNotes: notes } : act
+    );
+    setActivities(updatedActivities);
+    await setDoc(doc(db, 'users', user.uid), { activities: updatedActivities }, { merge: true });
+  };
+
+  const addChecklistItem = async (activityId: string, text: string) => {
+    if (!user || !text.trim()) return;
+    const newItem = { id: generateId(), text: text.trim(), done: false };
+
+    const updatedActivities = activities.map(act => {
+      if (act.id === activityId) {
+        return {
+          ...act,
+          checklist: [...(act.checklist || []), newItem]
+        };
+      }
+      return act;
+    });
+
+    setActivities(updatedActivities);
+    await setDoc(doc(db, 'users', user.uid), { activities: updatedActivities }, { merge: true });
+  };
+
+  const toggleChecklistItem = async (activityId: string, itemId: string) => {
+    if (!user) return;
+    const updatedActivities = activities.map(act => {
+      if (act.id === activityId && act.checklist) {
+        return {
+          ...act,
+          checklist: act.checklist.map(item =>
+            item.id === itemId ? { ...item, done: !item.done } : item
+          )
+        };
+      }
+      return act;
+    });
+    setActivities(updatedActivities);
+    await setDoc(doc(db, 'users', user.uid), { activities: updatedActivities }, { merge: true });
+  };
+
+  const deleteChecklistItem = async (activityId: string, itemId: string) => {
+    if (!user) return;
+    const updatedActivities = activities.map(act => {
+      if (act.id === activityId && act.checklist) {
+        return {
+          ...act,
+          checklist: act.checklist.filter(item => item.id !== itemId)
+        };
+      }
+      return act;
+    });
+    setActivities(updatedActivities);
+    await setDoc(doc(db, 'users', user.uid), { activities: updatedActivities }, { merge: true });
   };
 
 
@@ -1757,6 +1832,27 @@ function App() {
                             )}
                             {/* END OF NEW SPAN */}
                           </div>
+                          {/* Independent Notes Button */}
+                          <button
+                            className="activity-notes-btn"
+                            onClick={(e) => { e.stopPropagation(); setActiveNoteActivityId(a.id); }}
+                            title="Notes"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: a.executionNotes ? 'var(--accent)' : 'var(--text-dim)',
+                              cursor: 'pointer',
+                              padding: '4px',
+                              display: 'flex',
+                              alignItems: 'center'
+                            }}
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M12 20h9"></path>
+                              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                            </svg>
+                          </button>
+
                           <div className="activity-status-container">
                             {expandedActivityId === a.id ? (
                               <div className="activity-actions-menu">
@@ -1822,6 +1918,156 @@ function App() {
           onCancel={() => setCompletingActivity(null)}
         />
       )}
+
+      {/* Activity Notes & Checklist Modal */}
+      {activeNoteActivityId && (() => {
+        const activity = activities.find(a => a.id === activeNoteActivityId);
+        if (!activity) return null;
+
+        return (
+          <div className="os-overlay-blur" onClick={() => setActiveNoteActivityId(null)}>
+            <div className="os-modal glass-card" onClick={e => e.stopPropagation()} style={{ maxWidth: '450px', width: '90%', padding: '0' }}>
+
+              <header className="modal-header" style={{ padding: '20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: DOMAIN_COLORS[activity.domain] }} />
+                  <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{activity.name}</h3>
+                </div>
+                <button
+                  onClick={() => setActiveNoteActivityId(null)}
+                  className="close-btn-icon"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-dim)',
+                    cursor: 'pointer',
+                    padding: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '50%',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+              </header>
+
+              <div className="modal-content" style={{ padding: '20px' }}>
+
+                {/* Checklist Section */}
+                <div className="checklist-section" style={{ marginBottom: '25px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                    <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Checklist</h4>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
+                      {activity.checklist?.filter(i => i.done).length || 0} / {activity.checklist?.length || 0}
+                    </span>
+                  </div>
+
+                  <div className="checklist-items" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '15px' }}>
+                    {activity.checklist && activity.checklist.length > 0 ? (
+                      activity.checklist.map(item => (
+                        <div key={item.id} className={`checklist-row ${item.done ? 'is-done' : ''}`} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '8px 0' }}>
+                          <div
+                            onClick={() => toggleChecklistItem(activity.id, item.id)}
+                            style={{
+                              width: '20px',
+                              height: '20px',
+                              borderRadius: '6px',
+                              border: `2px solid ${item.done ? 'var(--accent)' : 'var(--text-dim)'}`,
+                              background: item.done ? 'var(--accent)' : 'transparent',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              flexShrink: 0,
+                              marginTop: '2px',
+                              transition: 'all 0.2s ease'
+                            }}
+                          >
+                            {item.done && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="4"><polyline points="20 6 9 17 4 12"></polyline></svg>}
+                          </div>
+                          <span
+                            style={{
+                              flex: 1,
+                              fontSize: '0.95rem',
+                              color: item.done ? 'var(--text-dim)' : 'var(--text-main)',
+                              textDecoration: item.done ? 'line-through' : 'none',
+                              lineHeight: '1.4'
+                            }}
+                          >
+                            {item.text}
+                          </span>
+                          <button
+                            onClick={() => deleteChecklistItem(activity.id, item.id)}
+                            style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', opacity: 0.6, padding: '0 4px' }}
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p style={{ fontSize: '0.9rem', color: 'var(--text-dim)', fontStyle: 'italic' }}>No items yet.</p>
+                    )}
+                  </div>
+
+                  <div className="add-checklist-item" style={{ display: 'flex', gap: '10px' }}>
+                    <input
+                      type="text"
+                      placeholder="Add an item..."
+                      className="os-input-field" // Reusing styling but simple
+                      style={{ flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 12px', color: 'white' }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          addChecklistItem(activity.id, e.currentTarget.value);
+                          e.currentTarget.value = '';
+                        }
+                      }}
+                    />
+                    <button
+                      className="add-btn-small"
+                      style={{
+                        background: 'var(--accent)',
+                        border: 'none',
+                        borderRadius: '8px',
+                        width: '36px',
+                        color: 'black',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                      onClick={(e) => {
+                        const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                        addChecklistItem(activity.id, input.value);
+                        input.value = '';
+                      }}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Legacy Notes Section (Still available but secondary) */}
+                <div className="notes-section">
+                  <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Additional Notes</h4>
+                  <textarea
+                    className="os-textarea-v2"
+                    style={{ minHeight: '80px', fontSize: '0.9rem' }}
+                    defaultValue={activity.executionNotes || ''}
+                    placeholder="Any other details..."
+                    onBlur={(e) => saveActivityNotes(activity.id, e.target.value)}
+                  />
+                </div>
+
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Drawer */}
       {isDrawerOpen && (

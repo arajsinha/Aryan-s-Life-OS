@@ -95,6 +95,8 @@ export interface Activity {
   // --- NEW: Link to Goals ---
   goalId?: string;
   goalType?: GoalType;
+  executionNotes?: string; // Legacy/Text notes
+  checklist?: { id: string; text: string; done: boolean }[]; // New todo-style notes
   // --- END: Link to Goals ---
 }
 
