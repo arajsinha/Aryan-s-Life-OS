@@ -14,12 +14,25 @@ export const ActivityCompletionModal: React.FC<ActivityCompletionModalProps> = (
     const [effort, setEffort] = useState<EffortLevel>('Medium');
     const [workCompleted, setWorkCompleted] = useState<string>('');
     const [notes, setNotes] = useState('');
+    const [direction, setDirection] = useState<'increase' | 'decrease'>('increase');
+
+    // Auto-detect direction based on goal
+    React.useEffect(() => {
+        if (goal?.metric) {
+            if (goal.metric.target < goal.metric.current) {
+                setDirection('decrease');
+            }
+        }
+    }, [goal]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        const value = Number(workCompleted) || 0;
+        const finalValue = direction === 'decrease' ? -Math.abs(value) : Math.abs(value);
+
         onSubmit({
             effortLevel: effort,
-            workCompleted: Number(workCompleted) || 0,
+            workCompleted: finalValue,
             notes
         });
     };
@@ -66,9 +79,44 @@ export const ActivityCompletionModal: React.FC<ActivityCompletionModalProps> = (
                         <label style={{ display: 'block', color: '#ccc', marginBottom: '8px', fontSize: '0.85rem' }}>
                             Progress Made {goal?.metric ? `(${goal.metric.unit})` : '(Units)'}
                         </label>
+
+                        <div style={{ display: 'flex', gap: '10px', marginBottom: '8px' }}>
+                            <button
+                                type="button"
+                                onClick={() => setDirection('increase')}
+                                style={{
+                                    flex: 1,
+                                    padding: '8px',
+                                    background: direction === 'increase' ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255,255,255,0.05)',
+                                    color: direction === 'increase' ? '#4caf50' : '#888',
+                                    border: direction === 'increase' ? '1px solid #4caf50' : '1px solid #333',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                ▲ Increase
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setDirection('decrease')}
+                                style={{
+                                    flex: 1,
+                                    padding: '8px',
+                                    background: direction === 'decrease' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255,255,255,0.05)',
+                                    color: direction === 'decrease' ? '#ef4444' : '#888',
+                                    border: direction === 'decrease' ? '1px solid #ef4444' : '1px solid #333',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                ▼ Decrease
+                            </button>
+                        </div>
+
                         <input
                             type="number"
-                            placeholder="e.g. 10"
+                            step="any"
+                            placeholder="e.g. 0.5"
                             value={workCompleted}
                             onChange={e => setWorkCompleted(e.target.value)}
                             className="form-input"

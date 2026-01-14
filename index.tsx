@@ -1007,7 +1007,7 @@ function App() {
     setActivities(updatedActivities);
 
     // 2. Update Goal Progress
-    if (completingActivity.goalId && data.workCompleted > 0) {
+    if (completingActivity.goalId && data.workCompleted !== 0) {
       const goal = goals.find(g => g.id === completingActivity.goalId);
       if (goal && goal.metric) {
         const newCurrent = (goal.metric.current || 0) + data.workCompleted;
