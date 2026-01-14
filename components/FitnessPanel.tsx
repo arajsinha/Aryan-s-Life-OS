@@ -237,9 +237,9 @@ const DashboardView: React.FC<FitnessPanelProps & { onNavigateToWorkout: () => v
     .filter(m => m.weight !== undefined)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]?.weight || 0;
 
-  const totalCalories = (dailyLog?.breakfast.reduce((sum, item) => sum + item.calories, 0) || 0) +
-    (dailyLog?.lunch.reduce((sum, item) => sum + item.calories, 0) || 0) +
-    (dailyLog?.dinner.reduce((sum, item) => sum + item.calories, 0) || 0);
+  const totalCalories = (dailyLog?.breakfast?.reduce((sum, item) => sum + item.calories, 0) || 0) +
+    (dailyLog?.lunch?.reduce((sum, item) => sum + item.calories, 0) || 0) +
+    (dailyLog?.dinner?.reduce((sum, item) => sum + item.calories, 0) || 0);
 
   const calorieTarget = dailyLog?.aiInsight?.calorieTarget || fitnessGoal?.tdee || 2000;
   const calorieProgress = (totalCalories / calorieTarget) * 100;
@@ -632,6 +632,8 @@ const MealSection: React.FC<{
 
 // --- Fitness History View ---
 
+import { FitnessHistoryDashboard } from './FitnessHistoryDashboard';
+
 interface FitnessHistoryViewProps {
   onBack: () => void;
   userId: string;
@@ -641,27 +643,32 @@ interface FitnessHistoryViewProps {
 const FitnessHistoryView: React.FC<FitnessHistoryViewProps> = ({ onBack, userId, fitnessGoal }) => {
   const [logs, setLogs] = useState<DailyFitnessLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showFullDashboard, setShowFullDashboard] = useState(false);
+  const [timeRange, setTimeRange] = useState<'7' | '30' | '90'>('7');
+
+  const displayedLogs = React.useMemo(() => {
+    const limit = parseInt(timeRange);
+    return logs.slice(0, limit);
+  }, [logs, timeRange]);
+
+  useEffect(() => {
+    calculateStats(displayedLogs);
+  }, [displayedLogs, fitnessGoal]);
 
   // Stats
   const [avgDeficit, setAvgDeficit] = useState(0);
   const [avgCalories, setAvgCalories] = useState(0);
   const [totalWorkouts, setTotalWorkouts] = useState(0);
-  const [projectedDate, setProjectedDate] = useState<string | null>(null);
   const [onTrackStatus, setOnTrackStatus] = useState<'ON_TRACK' | 'OFF_TRACK' | 'NEEDS_DATA'>('NEEDS_DATA');
 
   useEffect(() => {
+    // ... existing fetch logic ...
     const fetchHistory = async () => {
       try {
         const historyRef = collection(db, 'users', userId, 'dailyFitnessLogs');
-        // Get last 90 days (approx 3 months)
-        // Note: Firestore text-based date keys might sort correctly, but better to query or just fetch all if volume is low.
-        // Given constraints, let's fetch all and filter in memory or sort. 
-        // Assuming YYYY-MM-DD keys sort naturally.
-
         const q = query(historyRef, orderBy(documentId(), 'desc'), limit(90));
         const snapshot = await getDocs(q);
-
-        const fetchedLogs = snapshot.docs.map(doc => doc.data() as DailyFitnessLog).filter(l => l.date); // Ensure date exists
+        const fetchedLogs = snapshot.docs.map(doc => doc.data() as DailyFitnessLog).filter(l => l.date);
         setLogs(fetchedLogs);
         calculateStats(fetchedLogs);
       } catch (error) {
@@ -669,20 +676,23 @@ const FitnessHistoryView: React.FC<FitnessHistoryViewProps> = ({ onBack, userId,
       } finally {
         setLoading(false);
       }
-    };
-
+    }
     fetchHistory();
   }, [userId]);
 
+  // ... existing calculateStats ...
   const calculateStats = (data: DailyFitnessLog[]) => {
+    // ... existing logic ...
     if (data.length === 0) return;
 
-    // Filter logs that have calorie data
+    // Filter logs that have ANY data (calories, workout, or steps)
     const activeDays = data.filter(l => {
       const cals = (l.breakfast?.reduce((s, i) => s + i.calories, 0) || 0) +
         (l.lunch?.reduce((s, i) => s + i.calories, 0) || 0) +
         (l.dinner?.reduce((s, i) => s + i.calories, 0) || 0);
-      return cals > 0;
+      const hasWorkout = l.loggedWorkout && l.loggedWorkout.length > 0;
+      const hasSteps = (l.steps || 0) > 0;
+      return cals > 0 || hasWorkout || hasSteps;
     });
 
     if (activeDays.length === 0) return;
@@ -697,8 +707,6 @@ const FitnessHistoryView: React.FC<FitnessHistoryViewProps> = ({ onBack, userId,
         (log.dinner?.reduce((s, i) => s + i.calories, 0) || 0);
 
       const deficit = log.aiInsight?.deficit || 0;
-      // Fallback calculation if Ai insight missing but we have goal tdee
-      // const estimatedDeficit = (fitnessGoal?.tdee || 2000) - cals;
 
       totalDef += deficit;
       totalCals += cals;
@@ -710,24 +718,17 @@ const FitnessHistoryView: React.FC<FitnessHistoryViewProps> = ({ onBack, userId,
     setAvgCalories(Math.round(totalCals / activeDays.length));
     setTotalWorkouts(workouts);
 
-    // On Track Logic
-    // standard rule: 7700 kcal = 1kg fat
-    // Weight loss rate per week = (avgDeficit * 7) / 7700
-    // If deficit is positive, we are losing weight.
-
     if (fitnessGoal?.goalType.includes('loss') && avgDef > 0) {
       setOnTrackStatus('ON_TRACK');
       const lossPerWeek = (avgDef * 7) / 7700;
-      if (lossPerWeek < 0.2) setOnTrackStatus('OFF_TRACK'); // Too slow?
+      if (lossPerWeek < 0.2) setOnTrackStatus('OFF_TRACK');
     } else if (fitnessGoal?.goalType.includes('building') && avgDef < 0) {
-      // Building muscle often requires surplus (negative deficit)
       setOnTrackStatus('ON_TRACK');
     } else if (fitnessGoal?.goalType.includes('loss') && avgDef <= 0) {
       setOnTrackStatus('OFF_TRACK');
+    } else {
+      setOnTrackStatus('ON_TRACK');
     }
-
-    // Simple Projection?
-    // Not implementing full date math for now, just status.
   };
 
   const getDayCalories = (log: DailyFitnessLog) => {
@@ -736,15 +737,56 @@ const FitnessHistoryView: React.FC<FitnessHistoryViewProps> = ({ onBack, userId,
       (log.dinner?.reduce((s, i) => s + i.calories, 0) || 0);
   }
 
+
   if (loading) {
     return <div className="p-10 text-center">Loading History...</div>
   }
 
   return (
     <div className="fitness-history-view">
-      <div className="history-header">
-        <button className='btn-secondary' onClick={onBack}>← Back</button>
-        <h3>90-Day History</h3>
+      <FitnessHistoryDashboard
+        isOpen={showFullDashboard}
+        onClose={() => setShowFullDashboard(false)}
+        userId={userId}
+        fitnessGoal={fitnessGoal}
+      />
+
+      <div className="history-header" style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'stretch' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button className='btn-secondary' onClick={onBack}>← Back</button>
+            <h3 style={{ margin: 0 }}>Analysis</h3>
+          </div>
+          <button
+            onClick={() => setShowFullDashboard(true)}
+            className="btn-primary"
+            style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+          >
+            View Full Timeline
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', padding: '4px', borderRadius: '8px' }}>
+          {['7', '30', '90'].map((range) => (
+            <button
+              key={range}
+              onClick={() => setTimeRange(range as any)}
+              style={{
+                flex: 1,
+                padding: '6px',
+                background: timeRange === range ? 'rgba(255,255,255,0.1)' : 'transparent',
+                color: timeRange === range ? '#fff' : '#888',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+            >
+              {range} Days
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Analysis Card */}
@@ -754,9 +796,9 @@ const FitnessHistoryView: React.FC<FitnessHistoryViewProps> = ({ onBack, userId,
         </div>
         <div className="status-desc">
           {onTrackStatus === 'ON_TRACK'
-            ? `Great job! You are averaging a ${avgDeficit > 0 ? 'deficit' : 'surplus'} consistent with your goal.`
+            ? `Great job! You are averaging a ${avgDeficit > 0 ? 'deficit' : 'surplus'} consistent with your goal over the last ${timeRange} days.`
             : onTrackStatus === 'OFF_TRACK'
-              ? `You are averaging ${avgDeficit} deficit. You need to adjust your intake or activity to hit your goal.`
+              ? `Over the last ${timeRange} days, you are averaging ${avgDeficit > 0 ? 'a deficit of' : 'a surplus of'} ${Math.abs(avgDeficit)}. Adjust intake to hit your goal.`
               : "Log more days to get an analysis."}
         </div>
       </div>
@@ -779,7 +821,7 @@ const FitnessHistoryView: React.FC<FitnessHistoryViewProps> = ({ onBack, userId,
       </div>
 
       <div className="history-list">
-        {logs.map(log => {
+        {displayedLogs.map(log => {
           const cals = getDayCalories(log);
           const deficit = log.aiInsight?.deficit || 0;
           const tdee = log.aiInsight?.tdee || fitnessGoal?.tdee || 2000;

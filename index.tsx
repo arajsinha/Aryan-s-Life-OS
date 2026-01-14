@@ -14,7 +14,7 @@ import { ActivityCompletionModal } from './components/ActivityCompletionModal';
 
 // Around line 11
 // Add query, where, etc. for fetching recent health data
-import { doc, getDoc, setDoc, collection, getDocs, deleteDoc, query, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs, deleteDoc, query, where, arrayUnion } from "firebase/firestore";
 
 import { DOMAINS, DEFAULT_WEIGHTS, DOMAIN_COLORS } from './constants';
 import { generateId } from './utils';
@@ -1215,16 +1215,23 @@ function App() {
         calories: typeof item.calories === 'number' ? item.calories : 0
       }));
 
-      const updatedLog: DailyFitnessLog = {
-        ...(dailyLog as DailyFitnessLog),
-        [meal]: [...dailyLog[meal], ...newFoodItems]
-      };
-      setDailyLog(updatedLog);
+      // Functional state update to ensure we don't use stale dailyLog
+      setDailyLog(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          [meal]: [...prev[meal], ...newFoodItems]
+        };
+      });
 
       const todayStr = getLocalYYYYMMDD(new Date());
       const dailyLogRef = doc(db, 'users', user.uid, 'dailyFitnessLogs', todayStr);
-      // Use { merge: true } to prevent overwriting concurrent updates (e.g., steps)
-      await setDoc(dailyLogRef, updatedLog, { merge: true });
+
+      // Use arrayUnion to safely append to the list in Firestore without reading stale data
+      await setDoc(dailyLogRef, {
+        [meal]: arrayUnion(...newFoodItems),
+        date: todayStr // Ensure date is set correctly if creating new doc
+      }, { merge: true });
 
       showToast(`${newFoodItems.length} item(s) logged to ${meal}.`);
 
@@ -1840,7 +1847,7 @@ function App() {
                             style={{
                               background: 'transparent',
                               border: 'none',
-                              color: a.executionNotes ? 'var(--accent)' : 'var(--text-dim)',
+                              color: (a.executionNotes || (a.checklist && a.checklist.length > 0)) ? '#3b82f6' : 'var(--text-dim)',
                               cursor: 'pointer',
                               padding: '4px',
                               display: 'flex',
